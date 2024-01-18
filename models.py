@@ -20,8 +20,8 @@ from XMem.inference.interact.interactive_utils import (
     overlay_davis,
 )
 
-from utils import trans_bbox
-from datasets import VideoDataset
+from .utils import trans_bbox
+from .datasets import VideoDataset
 
 
 class Owlv2Wrapper:

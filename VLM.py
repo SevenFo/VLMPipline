@@ -1,8 +1,8 @@
 from typing import List
 import numpy as np
-from utils import get_device
+from .utils import get_device
 
-from models import Owlv2Wrapper, SAMWrapper, XMemWrapper
+from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 
 class VLM:

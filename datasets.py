@@ -4,7 +4,7 @@ from torchvision import transforms
 
 import cv2
 
-from utils import im_normalization
+from .utils import im_normalization
 
 
 class VideoDataset(Dataset):
