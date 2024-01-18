@@ -1,3 +1,6 @@
+accelerate
+open3d
+opencv-python
 progressbar2
 gdown
 gitpython
