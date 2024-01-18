@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 from base64 import b64encode
 from IPython.display import HTML, Image as IPImage, display
 
-from XMem.model.network import XMem
-from XMem.inference.inference_core import InferenceCore
-from XMem.dataset.range_transform import im_normalization
-from XMem.inference.interact.interactive_utils import (
+from .XMem.model.network import XMem
+from .XMem.inference.inference_core import InferenceCore
+from .XMem.dataset.range_transform import im_normalization
+from .XMem.inference.interact.interactive_utils import (
     index_numpy_to_one_hot_torch,
     torch_prob_to_numpy_mask,
     overlay_davis,
@@ -27,8 +27,8 @@ from .datasets import VideoDataset
 class Owlv2Wrapper:
     def __init__(self, model_name_or_path, device):
         self.processor = Owlv2Processor.from_pretrained(model_name_or_path)
-        self.model = Owlv2ForObjectDetection.from_pretrained(
-            model_name_or_path, device_map="auto"
+        self.model = Owlv2ForObjectDetection.from_pretrained(model_name_or_path).to(
+            device
         )
         self.device = device
         # change model mode to eval
@@ -94,7 +94,7 @@ class Owlv2Wrapper:
         labels = results["labels"].tolist()
         all = list(zip(boxes, scores, labels))
         if verbose:
-            self.visualization(all, image.transpose(1, 2, 0), self.processor.labels)
+            self.visualization(all, image.transpose(1, 2, 0), labels)
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
         # score_recorder = {}
         # best = {}
@@ -111,6 +111,8 @@ class Owlv2Wrapper:
         if release_memory:
             del inputs
             del outputs
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
             torch.cuda.empty_cache()
         return (boxes, scores, labels)
 
@@ -154,7 +156,7 @@ class SAMWrapper:
             color = color_map[int(label) % len(color_map)][
                 :3
             ]  # Convert label to integer
-            print((np.array(color) * 255).astype(np.uint8))
+            print(f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}")
             colored_mask[mask == label] = (np.array(color) * 255).astype(np.uint8)
         return colored_mask
 
@@ -176,7 +178,9 @@ class SAMWrapper:
         # plot image
         plt.figure()
         # mix image and mask
-        image = image.transpose((1, 2, 0))
+        assert (
+            colored_mask.shape == image.shape
+        ), f"image and mask should have same shape, while got {image.shape} and {colored_mask.shape}"
         image = cv2.addWeighted(colored_mask, 0.5, image, 0.5, 0)
         plt.imshow(image)
         if input_bbox is None:
@@ -227,7 +231,7 @@ class SAMWrapper:
         Returns:
             best_mask: The best mask.
         """
-        assert image.shape[-1] == 3, "image should be RGB format with shape (h, w, c)"
+        assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image and prompt, it seems that it provided resize function?
         inputs = self.processor(
             image,
@@ -270,12 +274,13 @@ class SAMWrapper:
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
-            print("best mask:")
-            self.visualization(image, input_bbox[0], best_mask)
+            print(f"best mask:")
+            self.visualization(image.transpose(1, 2, 0), best_mask, input_bbox[0])
         if release_memory:
             del inputs
             del outputs
-            torch.cuda.empty_cache()
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
         return best_mask
 
 
@@ -312,6 +317,8 @@ class XMemWrapper:
             self.video_dataset = VideoDataset(self.video_path)
         else:
             self.video_dataset = None
+        self.load_model()
+        self.processor = InferenceCore(self.network, config=self.config)
 
     def load_model(self):
         self.network = XMem(self.config, self.model_path).eval().to(self.device)
@@ -351,11 +358,9 @@ class XMemWrapper:
             first_frame: nparray (C,H,W) uint8 0~255
             mask: nparray (H,W)
         """
-        self.load_model()
         assert len(mask.shape) == 2, "mask dim should be HxW"
         self.num_objects = len(np.unique(mask)) - 1
         print(f"detect {self.num_objects} objects in mask")
-        self.processor = InferenceCore(self.network, config=self.config)
         self.processor.set_all_labels(
             range(1, self.num_objects + 1)
         )  # consecutive labels
@@ -375,9 +380,20 @@ class XMemWrapper:
                     first_frame.transpose(1, 2, 0), prediction
                 )
                 display(Image.fromarray(visualization))
+            del frame_torch, mask_torch
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
             return prediction
 
-    def process_frame(self, frame, verbose=False):
+    def process_frame(
+        self, frame, verbose=False, release_video_memory_every_step=False
+    ):
+        """
+        Process one frame.
+        Args:
+            release_video_memory_every_step: bool, whether to release video memory every step,
+            it may slow down the process while save memory a little bit
+        """
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
@@ -386,7 +402,15 @@ class XMemWrapper:
                 visualization = overlay_davis(frame.transpose(1, 2, 0), prediction)
                 display(Image.fromarray(visualization))
             self.frame_idx += 1
+            del frame_torch
+            if release_video_memory_every_step and self.device == "cuda":
+                torch.cuda.empty_cache()
             return prediction
+
+    def reset(self):
+        self.processor.clear_memory()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
     # deprecated
     def process_video(self, frames_to_propagate=200, visualize_every=20):
