@@ -11,10 +11,10 @@ import matplotlib.pyplot as plt
 from base64 import b64encode
 from IPython.display import HTML, Image as IPImage, display
 
-from XMem.model.network import XMem
-from XMem.inference.inference_core import InferenceCore
-from XMem.dataset.range_transform import im_normalization
-from XMem.inference.interact.interactive_utils import (
+from .XMem.model.network import XMem
+from .XMem.inference.inference_core import InferenceCore
+from .XMem.dataset.range_transform import im_normalization
+from .XMem.inference.interact.interactive_utils import (
     index_numpy_to_one_hot_torch,
     torch_prob_to_numpy_mask,
     overlay_davis,
