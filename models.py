@@ -290,6 +290,8 @@ class XMemWrapper:
         model_path,
         video_path=None,
         mask_path=None,
+        resnet_18_path=None,
+        resnet_50_path=None,
         device="cpu",
         verbose_frame_every=10,
     ):
@@ -317,10 +319,23 @@ class XMemWrapper:
             self.video_dataset = VideoDataset(self.video_path)
         else:
             self.video_dataset = None
-        self.load_model()
+        self.network = (
+            XMem(
+                self.config,
+                self.model_path,
+                resnet_18_path=resnet_18_path,
+                resnet_50_path=resnet_50_path,
+            )
+            .eval()
+            .to(self.device)
+        )
         self.processor = InferenceCore(self.network, config=self.config)
 
+    # deprecated
     def load_model(self):
+        import warnings
+
+        warnings.warn("This function is deprecated.", DeprecationWarning)
         self.network = XMem(self.config, self.model_path).eval().to(self.device)
 
     def load_mask(self):
