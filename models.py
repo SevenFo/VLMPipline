@@ -388,6 +388,12 @@ class XMemWrapper:
     def process_frame(
         self, frame, verbose=False, release_video_memory_every_step=False
     ):
+        """
+        Process one frame.
+        Args:
+            release_video_memory_every_step: bool, whether to release video memory every step,
+            it may slow down the process while save memory a little bit
+        """
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
