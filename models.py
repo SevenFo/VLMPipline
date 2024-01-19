@@ -268,10 +268,10 @@ class SAMWrapper:
                     plt.imshow(colored_mask)
                 plt.show()
         # merge all masks to one mask
-        best_mask = np.sum(np.array(best_masks), axis=0).astype(np.uint8)
+        best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
             print(f"best mask:")
-            self.visualization(image.transpose(1, 2, 0), input_bbox[0], best_mask)
+            self.visualization(image.transpose(1, 2, 0), best_mask, input_bbox[0])
         if release_memory:
             del inputs
             del outputs
