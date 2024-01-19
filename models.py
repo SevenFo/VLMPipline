@@ -317,6 +317,8 @@ class XMemWrapper:
             self.video_dataset = VideoDataset(self.video_path)
         else:
             self.video_dataset = None
+        self.load_model()
+        self.processor = InferenceCore(self.network, config=self.config)
 
     def load_model(self):
         self.network = XMem(self.config, self.model_path).eval().to(self.device)
@@ -356,11 +358,9 @@ class XMemWrapper:
             first_frame: nparray (C,H,W) uint8 0~255
             mask: nparray (H,W)
         """
-        self.load_model()
         assert len(mask.shape) == 2, "mask dim should be HxW"
         self.num_objects = len(np.unique(mask)) - 1
         print(f"detect {self.num_objects} objects in mask")
-        self.processor = InferenceCore(self.network, config=self.config)
         self.processor.set_all_labels(
             range(1, self.num_objects + 1)
         )  # consecutive labels
@@ -385,7 +385,9 @@ class XMemWrapper:
                 torch.cuda.empty_cache()
             return prediction
 
-    def process_frame(self, frame, verbose=False, release_video_memory_every_step = False):
+    def process_frame(
+        self, frame, verbose=False, release_video_memory_every_step=False
+    ):
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
