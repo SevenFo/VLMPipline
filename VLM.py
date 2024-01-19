@@ -52,7 +52,7 @@ class VLM:
         )
         return first_mask
 
-    def process_frame(self, frame: np.ndarray):
+    def process_frame(self, frame: np.ndarray, verbose = False):
         mask = self.xmem_wrapper.process_frame(frame, verbose=verbose)
         return mask
 
