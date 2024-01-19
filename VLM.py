@@ -13,10 +13,20 @@ class VLM:
         self.xmem_wrapper = XMemWrapper(xmem_model_path, device=self.device)
 
     def process_first_frame(
-        self, target_objects: List[str], frame: np.ndarray, owlv2_threshold=0.2,verbose=False, release_video_memory=True = True
+        self,
+        target_objects: List[str],
+        frame: np.ndarray,
+        owlv2_threshold=0.2,
+        verbose=False,
+        release_video_memory=True,
     ):
         owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
-            frame, target_objects, threshold=owlv2_threshold, sam_threshold=0.5, verbose=verbose, release_video_memory=release_video_memory
+            frame,
+            target_objects,
+            threshold=owlv2_threshold,
+            sam_threshold=0.5,
+            verbose=verbose,
+            release_video_memory=release_video_memory,
         )
         sam_input_bboxes = [owlv2_bboxes]
         sam_input_bpoints = [
@@ -34,7 +44,8 @@ class VLM:
             input_points=sam_input_bpoints,
             input_labels=sam_input_lables,
             threshold=sam_threshold,
-            verbose=verbose, release_video_memory=release_video_memory
+            verbose=verbose,
+            release_video_memory=release_video_memory,
         )
         first_mask = self.xmem_wrapper.process_first_frame(
             frame, sam_results, verbose=verbose
