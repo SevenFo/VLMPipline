@@ -6,11 +6,32 @@ from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 
 class VLM:
-    def __init__(self, owlv2_model_path, sam_model_path, xmem_model_path) -> None:
+    """
+    vlm pipeline concanates the three models: owlv2, sam, and xmem
+
+    Args:
+        owlv2_model_path (str): path to the owlv2 model
+        sam_model_path (str): path to the sam model
+        xmem_model_path (str): path to the xmem model
+    """
+
+    def __init__(
+        self,
+        owlv2_model_path,
+        sam_model_path,
+        xmem_model_path,
+        resnet_18_path=None,
+        resnet_50_path=None,
+    ) -> None:
         self.device = get_device()
         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
         self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
-        self.xmem_wrapper = XMemWrapper(xmem_model_path, device=self.device)
+        self.xmem_wrapper = XMemWrapper(
+            xmem_model_path,
+            device=self.device,
+            resnet_18_path=resnet_18_path,
+            resnet_50_path=resnet_50_path,
+        )
 
     def process_first_frame(
         self,

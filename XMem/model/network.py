@@ -15,7 +15,14 @@ from .memory_util import *
 
 
 class XMem(nn.Module):
-    def __init__(self, config, model_path=None, map_location=None):
+    def __init__(
+        self,
+        config,
+        model_path=None,
+        map_location=None,
+        resnet_18_path=None,
+        resnet_50_path=None,
+    ):
         """
         model_path/map_location are used in evaluation only
         map_location is for converting models saved in cuda to cpu
@@ -26,9 +33,12 @@ class XMem(nn.Module):
         self.single_object = config.get("single_object", False)
         print(f"Single object mode: {self.single_object}")
 
-        self.key_encoder = KeyEncoder()
+        self.key_encoder = KeyEncoder(resnet_model_path=resnet_50_path)
         self.value_encoder = ValueEncoder(
-            self.value_dim, self.hidden_dim, self.single_object
+            self.value_dim,
+            self.hidden_dim,
+            self.single_object,
+            resnet_model_path=resnet_18_path,
         )
 
         # Projection from f16 feature space to key/value space
