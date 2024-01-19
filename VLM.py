@@ -16,13 +16,15 @@ class VLM:
         owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
             frame, target_objects, threshold=0.2, verbose=True
         )
-        owlv2_bpoints = list(
-            [
-                [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
-                for bbox in owlv2_bboxes
-            ]
-        )
-        sam_input_lables = [1] * len(owlv2_labels)
+        owlv2_bpoints = [
+            list(
+                [
+                    [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+                    for bbox in owlv2_bboxes
+                ]
+            )
+        ]
+        sam_input_lables = [[1] * len(owlv2_labels)]
         sam_results = self.sam_wrapper.predict(
             frame,
             input_bbox=owlv2_bboxes,
