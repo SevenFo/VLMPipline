@@ -111,6 +111,8 @@ class Owlv2Wrapper:
         if release_memory:
             del inputs
             del outputs
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
             torch.cuda.empty_cache()
         return (boxes, scores, labels)
 
@@ -277,7 +279,8 @@ class SAMWrapper:
         if release_memory:
             del inputs
             del outputs
-            torch.cuda.empty_cache()
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
         return best_mask
 
 
@@ -377,9 +380,12 @@ class XMemWrapper:
                     first_frame.transpose(1, 2, 0), prediction
                 )
                 display(Image.fromarray(visualization))
+            del frame_torch, mask_torch
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
             return prediction
 
-    def process_frame(self, frame, verbose=False):
+    def process_frame(self, frame, verbose=False, release_video_memory_every_step = False):
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
@@ -388,7 +394,15 @@ class XMemWrapper:
                 visualization = overlay_davis(frame.transpose(1, 2, 0), prediction)
                 display(Image.fromarray(visualization))
             self.frame_idx += 1
+            del frame_torch
+            if release_video_memory_every_step and self.device == "cuda":
+                torch.cuda.empty_cache()
             return prediction
+
+    def reset(self):
+        self.processor.clear_memory()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
     # deprecated
     def process_video(self, frames_to_propagate=200, visualize_every=20):

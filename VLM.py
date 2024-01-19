@@ -26,7 +26,7 @@ class VLM:
             target_objects,
             threshold=owlv2_threshold,
             verbose=verbose,
-            release_video_memory=release_video_memory,
+            release_memory=release_video_memory,
         )
         sam_input_bboxes = [owlv2_bboxes]
         sam_input_bpoints = [
@@ -45,14 +45,14 @@ class VLM:
             input_labels=sam_input_lables,
             threshold=sam_threshold,
             verbose=verbose,
-            release_video_memory=release_video_memory,
+            release_memory=release_video_memory,
         )
         first_mask = self.xmem_wrapper.process_first_frame(
             frame, sam_results, verbose=verbose
         )
         return first_mask
 
-    def process_frame(self, frame: np.ndarray, verbose = False):
+    def process_frame(self, frame: np.ndarray, verbose=False):
         mask = self.xmem_wrapper.process_frame(frame, verbose=verbose)
         return mask
 
