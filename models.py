@@ -227,7 +227,7 @@ class SAMWrapper:
         Returns:
             best_mask: The best mask.
         """
-        assert image.shape[-1] == 3, "image should be RGB format with shape (h, w, c)"
+        assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image and prompt, it seems that it provided resize function?
         inputs = self.processor(
             image,
@@ -271,7 +271,7 @@ class SAMWrapper:
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
             print("best mask:")
-            self.visualization(image, input_bbox[0], best_mask)
+            self.visualization(image.transpose(1, 2, 0), input_bbox[0], best_mask)
         if release_memory:
             del inputs
             del outputs
