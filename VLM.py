@@ -22,6 +22,7 @@ class VLM:
                 for bbox in owlv2_bboxes
             ]
         )
+        sam_input_lables = [1] * len(owlv2_labels)
         sam_results = self.sam_wrapper.predict(
             frame,
             input_bbox=owlv2_bboxes,
