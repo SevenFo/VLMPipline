@@ -17,6 +17,7 @@ class VLM:
         target_objects: List[str],
         frame: np.ndarray,
         owlv2_threshold=0.2,
+        sam_threshold=0.5,
         verbose=False,
         release_video_memory=True,
     ):
@@ -24,7 +25,6 @@ class VLM:
             frame,
             target_objects,
             threshold=owlv2_threshold,
-            sam_threshold=0.5,
             verbose=verbose,
             release_video_memory=release_video_memory,
         )
