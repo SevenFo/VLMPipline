@@ -270,7 +270,7 @@ class SAMWrapper:
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
-            print("best mask:")
+            print(f"best mask: mask len:{len(best_mask)}, mask:{best_mask}")
             self.visualization(image.transpose(1, 2, 0), input_bbox[0], best_mask)
         if release_memory:
             del inputs
