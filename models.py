@@ -154,7 +154,7 @@ class SAMWrapper:
             color = color_map[int(label) % len(color_map)][
                 :3
             ]  # Convert label to integer
-            print((np.array(color) * 255).astype(np.uint8))
+            print(f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}")
             colored_mask[mask == label] = (np.array(color) * 255).astype(np.uint8)
         return colored_mask
 
@@ -177,6 +177,9 @@ class SAMWrapper:
         plt.figure()
         # mix image and mask
         image = image.transpose((1, 2, 0))
+        assert (
+            colored_mask.shape == image.shape
+        ), f"image and mask should have same shape, while got {image.shape} and {colored_mask.shape}"
         image = cv2.addWeighted(colored_mask, 0.5, image, 0.5, 0)
         plt.imshow(image)
         if input_bbox is None:
