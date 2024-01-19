@@ -27,7 +27,7 @@ class VLM:
             frame,
             input_bbox=owlv2_bboxes,
             input_points=owlv2_bpoints,
-            input_labels=owlv2_labels,
+            input_labels=sam_input_lables,
             threshold=0.5,
             verbose=True,
         )
