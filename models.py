@@ -176,7 +176,6 @@ class SAMWrapper:
         # plot image
         plt.figure()
         # mix image and mask
-        image = image.transpose((1, 2, 0))
         assert (
             colored_mask.shape == image.shape
         ), f"image and mask should have same shape, while got {image.shape} and {colored_mask.shape}"
