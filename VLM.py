@@ -52,8 +52,12 @@ class VLM:
         )
         return first_mask
 
-    def process_frame(self, frame: np.ndarray, verbose=False):
-        mask = self.xmem_wrapper.process_frame(frame, verbose=verbose)
+    def process_frame(
+        self, frame: np.ndarray, verbose=False, release_video_memory=False
+    ):
+        mask = self.xmem_wrapper.process_frame(
+            frame, verbose=verbose, release_video_memory_every_step=release_video_memory
+        )
         return mask
 
     def reset(self):
