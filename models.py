@@ -27,8 +27,8 @@ from .datasets import VideoDataset
 class Owlv2Wrapper:
     def __init__(self, model_name_or_path, device):
         self.processor = Owlv2Processor.from_pretrained(model_name_or_path)
-        self.model = Owlv2ForObjectDetection.from_pretrained(
-            model_name_or_path, device_map="auto"
+        self.model = Owlv2ForObjectDetection.from_pretrained(model_name_or_path).to(
+            device
         )
         self.device = device
         # change model mode to eval
@@ -94,7 +94,7 @@ class Owlv2Wrapper:
         labels = results["labels"].tolist()
         all = list(zip(boxes, scores, labels))
         if verbose:
-            self.visualization(all, image.transpose(1, 2, 0), self.processor.labels)
+            self.visualization(all, image.transpose(1, 2, 0), labels)
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
         # score_recorder = {}
         # best = {}
