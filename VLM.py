@@ -1,7 +1,8 @@
 from typing import List
 import numpy as np
-from .utils import get_device
+import cv2
 
+from .utils import get_device
 from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 
@@ -34,6 +35,19 @@ class VLM:
             resnet_50_path=resnet_50_path,
         )
 
+    def _resize_frame(self, frame, resize_to):
+        # resize frame by the shortest side
+        if resize_to is not None:
+            assert isinstance(resize_to, int)
+            frame = frame.transpose(1, 2, 0)  # transpose to h,w,c
+            h, w = frame.shape[:2]
+            if h < w:
+                frame = cv2.resize(frame, (resize_to, int(resize_to * h / w)))
+            else:
+                frame = cv2.resize(frame, (int(resize_to * w / h), resize_to))
+            frame = frame.transpose(2, 0, 1)  # transpose back to c,h,w
+        return frame
+
     def process_first_frame(
         self,
         target_objects: List[str],
@@ -42,7 +56,9 @@ class VLM:
         sam_threshold=0.5,
         verbose=False,
         release_video_memory=True,
+        resize_to=None,
     ):
+        frame = self._resize_frame(frame, resize_to)
         owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
             frame,
             target_objects,
@@ -75,8 +91,13 @@ class VLM:
         return first_mask
 
     def process_frame(
-        self, frame: np.ndarray, verbose=False, release_video_memory=False
+        self,
+        frame: np.ndarray,
+        verbose=False,
+        release_video_memory=False,
+        resize_to=None,
     ):
+        frame = self._resize_frame(frame, resize_to)
         mask = self.xmem_wrapper.process_frame(
             frame, verbose=verbose, release_video_memory_every_step=release_video_memory
         )
