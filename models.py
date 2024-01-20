@@ -63,7 +63,66 @@ class Owlv2Wrapper:
             )
         plt.show()
 
-    def predict(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
+    def predictm(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
+        """
+        @params: image: numpy array, only accept batch RGB image
+        @params: texts: list of list of str or a list of str or single str
+        @params: threshold: float
+        @return: list of tuple (box, score, label)
+        @description: predict the result
+        """
+        # check image format
+        assert (
+            image.shape[1] == 3 and len(image.shape) == 4
+        ), "image should be RGB format with shape (b, c, h, w)"
+        assert (
+            type(texts) == list and type(texts[0]) == list
+        ), "texts should be list of list of str"
+        # preprocess image
+        inputs = self.processor(text=texts, images=image, return_tensors="pt").to(
+            self.device
+        )
+        # inference
+        outputs = self.model(**inputs)
+        # Target image sizes (height, width) to rescale box predictions [batch_size, 2]
+        target_sizes = torch.Tensor(
+            [[np.max(image.shape[-2:]), np.max(image.shape[-2:])]]
+        ).to(self.device)
+        results = self.processor.post_process_object_detection(
+            outputs=outputs, threshold=threshold, target_sizes=target_sizes
+        )
+
+        # get boxes score and labels
+        boxes = results["boxes"].tolist()  # [[(x1, y1, x2, y2), ...)]] b, r, 4
+        scores = results["scores"].tolist() # b, r, 4
+        labels = results["labels"].tolist() # b, r, 4
+        all = list(zip(boxes, scores, labels))
+        if verbose:
+            self.visualization(all, image.transpose(1, 2, 0), labels)
+            print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
+        # score_recorder = {}
+        # best = {}
+        # for box, score, label in all:
+        #     if str(label) not in score_recorder.keys():
+        #         score_recorder.update({str(label):score})
+        #     else:
+        #         if score_recorder[str(label)] > score:
+        #             continue
+        #     score_recorder[str(label)] = score
+        #     best.update({str(label):{'score':score,'bbox':box}})
+        #     print(score_recorder)
+        # best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
+        if release_memory:
+            del inputs
+            del outputs
+            if self.device == "cuda":
+                torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
+        return (boxes, scores, labels)
+
+    def predict(
+        self, image, texts, threshold=0.5, verbose=False, release_memory=True
+    ):
         """
         @params: image: numpy array, only accept one RGB image
         @params: texts: list of list of str or a list of str or single str
