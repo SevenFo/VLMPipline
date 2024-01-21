@@ -94,8 +94,8 @@ class Owlv2Wrapper:
 
         # get boxes score and labels
         boxes = results["boxes"].tolist()  # [[(x1, y1, x2, y2), ...)]] b, r, 4
-        scores = results["scores"].tolist() # b, r, 4
-        labels = results["labels"].tolist() # b, r, 4
+        scores = results["scores"].tolist()  # b, r, 4
+        labels = results["labels"].tolist()  # b, r, 4
         all = list(zip(boxes, scores, labels))
         if verbose:
             print(f"Detect object: {texts}")
@@ -121,9 +121,7 @@ class Owlv2Wrapper:
             torch.cuda.empty_cache()
         return (boxes, scores, labels)
 
-    def predict(
-        self, image, texts, threshold=0.5, verbose=False, release_memory=True
-    ):
+    def predict(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
         """
         @params: image: numpy array, only accept one RGB image
         @params: texts: list of list of str or a list of str or single str
@@ -435,11 +433,20 @@ class XMemWrapper:
             mask: nparray (H,W)
         """
         assert len(mask.shape) == 2, "mask dim should be HxW"
-        self.num_objects = len(np.unique(mask)) - 1
+        unique_labels = np.unique(mask)
+        self.num_objects = len(unique_labels) - 1
         print(f"detect {self.num_objects} objects in mask")
         self.processor.set_all_labels(
             range(1, self.num_objects + 1)
         )  # consecutive labels
+        # Create a mapping from new labels to original labels
+        self.label_mapping = {
+            new_label: original_label
+            for new_label, original_label in enumerate(unique_labels, start=1)
+        }
+        # Create a mapping from original labels to new labels
+        self.inverse_label_mapping = {v: k for k, v in self.label_mapping.items()}
+
         self.frame_idx = 0
         with torch.cuda.amp.autocast(enabled=True):
             # convert numpy array to pytorch tensor format (C H W float64 tensor, every pix 0~1)
@@ -452,10 +459,12 @@ class XMemWrapper:
             prediction = self.processor.step(frame_torch, mask_torch[1:])
             prediction = torch_prob_to_numpy_mask(prediction)
             if verbose:
-                visualization = overlay_davis(
+                visualization_by_individual = overlay_davis(
                     first_frame.transpose(1, 2, 0), prediction
                 )
-                display(Image.fromarray(visualization))
+                display(Image.fromarray(visualization_by_individual))
+            # Map the prediction labels back to the original labels
+            prediction = np.vectorize(self.label_mapping.get)(prediction)
             del frame_torch, mask_torch
             if self.device == "cuda":
                 torch.cuda.empty_cache()
@@ -475,8 +484,12 @@ class XMemWrapper:
             prediction = self.processor.step(frame_torch)
             prediction = torch_prob_to_numpy_mask(prediction)  # uint8 ndarray
             if verbose and self.frame_idx % self.verbose_frame_every == 0:
-                visualization = overlay_davis(frame.transpose(1, 2, 0), prediction)
-                display(Image.fromarray(visualization))
+                visualization_by_individual = overlay_davis(
+                    frame.transpose(1, 2, 0), prediction,
+                )
+                display(Image.fromarray(visualization_by_individual))
+            # Map the prediction labels back to the original labels
+            prediction = np.vectorize(self.label_mapping.get)(prediction)
             self.frame_idx += 1
             del frame_torch
             if release_video_memory_every_step and self.device == "cuda":

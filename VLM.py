@@ -24,6 +24,8 @@ class VLM:
         resnet_18_path=None,
         resnet_50_path=None,
         device=get_device(),
+        resize_to=(480, 480),
+        category_multiplier=100,
     ) -> None:
         self.device = device
         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
@@ -33,6 +35,17 @@ class VLM:
             device=self.device,
             resnet_18_path=resnet_18_path,
             resnet_50_path=resnet_50_path,
+        )
+        if resize_to is not None:
+            self.first_frame_resize_to = (
+                resize_to[0] if len(resize_to) == 2 else resize_to
+            )
+            self.frame_resize_to = resize_to[1] if len(resize_to) == 2 else resize_to
+        else:
+            self.first_frame_resize_to = None
+            self.frame_resize_to = None
+        self.category_multiplier = (
+            category_multiplier  # 用于将sam的结果乘以一个大的常数，然后加到total_mask上
         )
 
     def _resize_frame(self, frame, resize_to):
@@ -58,6 +71,7 @@ class VLM:
         release_video_memory=True,
         resize_to=None,
     ):
+        resize_to = self.first_frame_resize_to if resize_to is None else resize_to
         frame = self._resize_frame(frame, resize_to)
         owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
             frame,
@@ -66,27 +80,37 @@ class VLM:
             verbose=verbose,
             release_memory=release_video_memory,
         )
-        sam_input_bboxes = [owlv2_bboxes]
-        sam_input_bpoints = [
-            list(
+        total_mask = np.zeros_like(frame)
+        # 对每个类别进行循环
+        for i, label in enumerate(set(owlv2_labels)):
+            # 获取当前类别的bbox
+            current_bboxes = [
+                bbox for bbox, lbl in zip(owlv2_bboxes, owlv2_labels) if lbl == label
+            ]
+            sam_input_bboxes = [current_bboxes]
+            sam_input_bpoints = [
                 [
-                    [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
-                    for bbox in owlv2_bboxes  # every bbox only has one point
+                    [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+                    for bbox in current_bboxes
                 ]
+            ]  # every bbox only has one point
+            sam_input_lables = [[[1] * len(current_bboxes)]]
+            # 调用sam_wrapper.predict
+            sam_result = self.sam_wrapper.predict(
+                frame,
+                input_bbox=sam_input_bboxes,
+                input_points=sam_input_bpoints,
+                input_labels=sam_input_lables,
+                threshold=sam_threshold,
+                verbose=verbose,
+                release_memory=release_video_memory,
             )
-        ]
-        sam_input_lables = [[[1] * len(owlv2_labels)]]
-        sam_results = self.sam_wrapper.predict(
-            frame,
-            input_bbox=sam_input_bboxes,
-            input_points=sam_input_bpoints,
-            input_labels=sam_input_lables,
-            threshold=sam_threshold,
-            verbose=verbose,
-            release_memory=release_video_memory,
-        )
+            # 将sam_result加上类别前缀标签
+            total_mask += sam_result[sam_result > 0] + (
+                (label + 1) * self.category_multiplier
+            )
         first_mask = self.xmem_wrapper.process_first_frame(
-            frame, sam_results, verbose=verbose
+            frame, total_mask, verbose=verbose
         )
         return first_mask
 
@@ -97,6 +121,7 @@ class VLM:
         release_video_memory=False,
         resize_to=None,
     ):
+        resize_to = self.frame_resize_to if resize_to is None else resize_to
         frame = self._resize_frame(frame, resize_to)
         mask = self.xmem_wrapper.process_frame(
             frame, verbose=verbose, release_video_memory_every_step=release_video_memory
