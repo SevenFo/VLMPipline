@@ -98,8 +98,9 @@ class Owlv2Wrapper:
         labels = results["labels"].tolist() # b, r, 4
         all = list(zip(boxes, scores, labels))
         if verbose:
-            self.visualization(all, image.transpose(1, 2, 0), labels)
+            print(f"Detect object: {texts}")
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
+            self.visualization(all, image.transpose(1, 2, 0), labels)
         # score_recorder = {}
         # best = {}
         # for box, score, label in all:
@@ -153,8 +154,9 @@ class Owlv2Wrapper:
         labels = results["labels"].tolist()
         all = list(zip(boxes, scores, labels))
         if verbose:
-            self.visualization(all, image.transpose(1, 2, 0), labels)
+            print(f"Detect object: {texts}")
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
+            self.visualization(all, image.transpose(1, 2, 0), labels)
         # score_recorder = {}
         # best = {}
         # for box, score, label in all:

@@ -120,6 +120,7 @@ def convert_depth_to_pointcloud(
     clip_far=3.5,
     clip_near=0.05,
     mask=None,
+    return_points = True,
 ):
     """
     padding can be 0 (None) or 255 (the farthest boundary)
@@ -133,6 +134,8 @@ def convert_depth_to_pointcloud(
     if mask is not None:
         mask = mask.astype(np.uint8) > 0
         pcl = pcl[mask]
+    if return_points:
+        return pcl
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pcl.reshape(-1, 3))
     return pcd
