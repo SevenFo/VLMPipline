@@ -125,9 +125,14 @@ def convert_depth_to_pointcloud(
     """
     padding can be 0 (None) or 255 (the farthest boundary)
     """
-    depth_in_meters = (
+    if depth_image.dtype == np.float32:
+        depth_in_meters = np.array(depth_image, dtype=np.float64) * (clip_far - clip_near)+ clip_near  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
+    elif depth_image.dtype == np.uint8:
+        depth_in_meters = (
         np.array(depth_image, dtype=np.float64) / 255 * (clip_far - clip_near)
-    ) + clip_near  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
+        ) + clip_near  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
+    else:
+        raise ValueError(f"not support depth_image type:{depth_image.dtype}")
     pcl = pointcloud_from_depth_and_camera_params(
         depth_in_meters, extrinsic_params, camera_intrinsics
     )

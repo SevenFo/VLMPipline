@@ -154,7 +154,7 @@ class Owlv2Wrapper:
         if verbose:
             print(f"Detect object: {texts}")
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
-            self.visualization(all, image.transpose(1, 2, 0), labels)
+            self.visualization(all, image.transpose(1, 2, 0), texts)
         # score_recorder = {}
         # best = {}
         # for box, score, label in all:
@@ -425,14 +425,14 @@ class XMemWrapper:
         frame_norm = im_normalization(frame)
         return frame_norm, frame
 
-    def process_first_frame(self, first_frame, mask, verbose=False):
+    def process_first_frame(self, first_frame, mask, verbose=False, inv_resize_to=None):
         """
         Load model and process the first frame.
         Args:
             first_frame: nparray (C,H,W) uint8 0~255
             mask: nparray (H,W)
         """
-        assert len(mask.shape) == 2, "mask dim should be HxW"
+        assert len(mask.shape) == 2, f"mask dim should be HxW, got {len(mask.shape)} of {mask.shape}"
         unique_labels = np.unique(mask)
         self.num_objects = len(unique_labels) - 1
         print(f"detect {self.num_objects} objects in mask")
@@ -442,15 +442,18 @@ class XMemWrapper:
         # Create a mapping from new labels to original labels
         self.label_mapping = {
             new_label: original_label
-            for new_label, original_label in enumerate(unique_labels, start=1)
+            for new_label, original_label in enumerate(unique_labels, start=0)
         }
+        print(f'label mapping dict:{self.label_mapping}')
         # Create a mapping from original labels to new labels
         self.inverse_label_mapping = {v: k for k, v in self.label_mapping.items()}
+        print(f'inv label mapping dict:{self.inverse_label_mapping}')
 
         self.frame_idx = 0
         with torch.cuda.amp.autocast(enabled=True):
             # convert numpy array to pytorch tensor format (C H W float64 tensor, every pix 0~1)
             # and move to device and normalize
+            mask = np.vectorize(self.inverse_label_mapping.get)(mask)
             frame_torch, _ = self.match_image_format(first_frame)
             mask_torch = index_numpy_to_one_hot_torch(mask, self.num_objects + 1).to(
                 self.device
@@ -463,6 +466,14 @@ class XMemWrapper:
                     first_frame.transpose(1, 2, 0), prediction
                 )
                 display(Image.fromarray(visualization_by_individual))
+            prediction = cv2.resize(
+                prediction, inv_resize_to[-2:], cv2.INTER_NEAREST
+            ) if inv_resize_to is not None else prediction
+            if verbose and inv_resize_to is not None:
+                visualization_by_individual = overlay_davis(
+                    cv2.resize(first_frame.transpose(1, 2, 0),inv_resize_to[-2:]), prediction
+                )
+                display(Image.fromarray(visualization_by_individual))
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
             del frame_torch, mask_torch
@@ -471,7 +482,7 @@ class XMemWrapper:
             return prediction
 
     def process_frame(
-        self, frame, verbose=False, release_video_memory_every_step=False
+        self, frame, verbose=False, release_video_memory_every_step=False, inv_resize_to=None
     ):
         """
         Process one frame.
@@ -488,6 +499,9 @@ class XMemWrapper:
                     frame.transpose(1, 2, 0), prediction,
                 )
                 display(Image.fromarray(visualization_by_individual))
+            prediction = cv2.resize(
+                prediction, inv_resize_to[-2:], cv2.INTER_NEAREST
+            ) if inv_resize_to is not None else prediction
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
             self.frame_idx += 1
