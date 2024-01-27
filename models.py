@@ -467,7 +467,7 @@ class XMemWrapper:
                 )
                 display(Image.fromarray(visualization_by_individual))
             prediction = cv2.resize(
-                prediction, inv_resize_to[-2:], cv2.INTER_NEAREST
+                prediction, inv_resize_to[-2:], interpolation=cv2.INTER_NEAREST
             ) if inv_resize_to is not None else prediction
             if verbose and inv_resize_to is not None:
                 visualization_by_individual = overlay_davis(
@@ -500,7 +500,7 @@ class XMemWrapper:
                 )
                 display(Image.fromarray(visualization_by_individual))
             prediction = cv2.resize(
-                prediction, inv_resize_to[-2:], cv2.INTER_NEAREST
+                prediction, inv_resize_to[-2:], interpolation=cv2.INTER_NEAREST
             ) if inv_resize_to is not None else prediction
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
