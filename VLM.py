@@ -26,7 +26,8 @@ class VLM:
         device=get_device(),
         resize_to=(480, 480),
         category_multiplier=100,
-        verbose = None
+        verbose = None,
+        verbose_frame_every = 10,
     ) -> None:
         self.device = device
         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
@@ -36,6 +37,7 @@ class VLM:
             device=self.device,
             resnet_18_path=resnet_18_path,
             resnet_50_path=resnet_50_path,
+            verbose_frame_every=verbose_frame_every
         )
         if resize_to is not None:
             self.first_frame_resize_to = (
