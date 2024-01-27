@@ -1,8 +1,28 @@
-import torch
+import torch, datetime
 from torchvision import transforms
 import numpy as np
 import open3d as o3d
 
+class bcolors:
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
+
+def get_clock_time(milliseconds=False):
+    curr_time = datetime.datetime.now()
+    if milliseconds:
+        return f"{curr_time.hour}:{curr_time.minute}:{curr_time.second}.{curr_time.microsecond // 1000}"
+    else:
+        return f"{curr_time.hour}:{curr_time.minute}:{curr_time.second}"
+
+def log_info(info, color=bcolors.OKGREEN):
+    print(f"{color}[VLM INFO|{get_clock_time()}] {info}{bcolors.ENDC}")
 
 def get_device():
     if torch.cuda.is_available():
@@ -56,6 +76,21 @@ def free_video_memory(*variables_to_del, device="cuda"):
     # print total available memory and used memory (in bytes)
     print(
         f"total memory (in MB): {t/1024/1024}, reserved memory (in MB): {r/1024/1024}, allocated memory (in MB): {a/1024/1024}"
+    )
+
+def get_memory_usage(device="cuda"):
+    """
+    Get memory usage
+    """
+
+    assert device == "cuda", "Only support cuda device"
+
+    t = torch.cuda.get_device_properties(device).total_memory
+    r = torch.cuda.memory_reserved(device)
+    a = torch.cuda.memory_allocated(device)
+    # print total available memory and used memory (in bytes)
+    print(
+        f"total memory (in MB): {round(t/1024/1024,1)}, reserved memory (in MB): {round(r/1024/1024,1)}, allocated memory (in MB): {round(a/1024/1024,1)}"
     )
 
 

@@ -20,7 +20,7 @@ from .XMem.inference.interact.interactive_utils import (
     overlay_davis,
 )
 
-from .utils import trans_bbox
+from .utils import trans_bbox, get_memory_usage, bcolors, get_clock_time, log_info
 from .datasets import VideoDataset
 
 
@@ -48,9 +48,7 @@ class Owlv2Wrapper:
         for box, score, label in result:
             box = [round(i, 2) for i in box]
             box = trans_bbox(box)
-            print(
-                f"Detected {labels[label]} with confidence {round(score, 3)} at location {box}"
-            )
+            log_info(f"Detected {labels[label]} with confidence {round(score, 3)} at location {[round(i, 2) for i in box]}")
             plt.gca().add_patch(
                 plt.Rectangle(
                     (box[0], box[1]),
@@ -98,7 +96,7 @@ class Owlv2Wrapper:
         labels = results["labels"].tolist()  # b, r, 4
         all = list(zip(boxes, scores, labels))
         if verbose:
-            print(f"Detect object: {texts}")
+            # print(f"{bcolors.OKGREEN}[VLM INFO | {get_c}] Detect object: {texts}")
             print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
             self.visualization(all, image.transpose(1, 2, 0), labels)
         # score_recorder = {}
@@ -129,14 +127,17 @@ class Owlv2Wrapper:
         @return: list of tuple (box, score, label)
         @description: predict the result
         """
+        log_info("#"*10+"Owlv2 Model START"+"#"*10)
         # check image format
-        assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
+        assert image.shape[0] == 3 and len(image.shape) == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image
         inputs = self.processor(text=texts, images=image, return_tensors="pt").to(
             self.device
         )
         # inference
         outputs = self.model(**inputs)
+        # show gpu memory usage
+        get_memory_usage()
         # Target image sizes (height, width) to rescale box predictions [batch_size, 2]
         target_sizes = torch.Tensor(
             [[np.max(image.shape[-2:]), np.max(image.shape[-2:])]]
@@ -144,36 +145,38 @@ class Owlv2Wrapper:
         results = self.processor.post_process_object_detection(
             outputs=outputs, threshold=threshold, target_sizes=target_sizes
         )
-        # only has one batch
-        results = results[0]
-        # get boxes score and labels
-        boxes = results["boxes"].tolist()  # [(x1, y1, x2, y2), ...)]
-        scores = results["scores"].tolist()
-        labels = results["labels"].tolist()
-        all = list(zip(boxes, scores, labels))
-        if verbose:
-            print(f"Detect object: {texts}")
-            print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
-            self.visualization(all, image.transpose(1, 2, 0), texts)
-        # score_recorder = {}
-        # best = {}
-        # for box, score, label in all:
-        #     if str(label) not in score_recorder.keys():
-        #         score_recorder.update({str(label):score})
-        #     else:
-        #         if score_recorder[str(label)] > score:
-        #             continue
-        #     score_recorder[str(label)] = score
-        #     best.update({str(label):{'score':score,'bbox':box}})
-        #     print(score_recorder)
-        # best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
+        ret_value = []
+        # we got a batch of image
+        for idx, result in enumerate(results):
+            # get boxes score and labels
+            boxes = result["boxes"].tolist()  # [(x1, y1, x2, y2), ...)]
+            scores = result["scores"].tolist()
+            labels = result["labels"].tolist()
+            _all = list(zip(boxes, scores, labels))
+            ret_value.append((boxes, scores, labels))
+            if verbose:
+                log_info(f"Detect {texts[idx]}")
+                self.visualization(_all, image.transpose(1, 2, 0), texts)
+            # score_recorder = {}
+            # best = {}
+            # for box, score, label in _all:
+            #     if str(label) not in score_recorder.keys():
+            #         score_recorder.update({str(label):score})
+            #     else:
+            #         if score_recorder[str(label)] > score:
+            #             continue
+            #     score_recorder[str(label)] = score
+            #     best.update({str(label):{'score':score,'bbox':box}})
+            #     print(score_recorder)
+            # best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
         if release_memory:
             del inputs
             del outputs
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             torch.cuda.empty_cache()
-        return (boxes, scores, labels)
+        log_info("#"*10+"Owlv2 Model END"+"#"*10)
+        return ret_value[0]
 
 
 class SAMWrapper:
@@ -215,7 +218,7 @@ class SAMWrapper:
             color = color_map[int(label) % len(color_map)][
                 :3
             ]  # Convert label to integer
-            print(f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}")
+            log_info(f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}")
             colored_mask[mask == label] = (np.array(color) * 255).astype(np.uint8)
         return colored_mask
 
@@ -290,6 +293,7 @@ class SAMWrapper:
         Returns:
             best_mask: The best mask.
         """
+        log_info("#"*10+"SAM Model START"+"#"*10)
         assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image and prompt, it seems that it provided resize function?
         inputs = self.processor(
@@ -301,6 +305,8 @@ class SAMWrapper:
         ).to(self.device)
         # inference
         outputs = self.model(**inputs)
+        # show gpu memory usage
+        get_memory_usage()
         # get masks and scores (as we only get one batch, we only need to get the first one)
         masks = self.processor.image_processor.post_process_masks(
             outputs.pred_masks.cpu(),
@@ -325,7 +331,7 @@ class SAMWrapper:
             if verbose:
                 plt.figure()
                 for m_idx, m in enumerate(masks[idx].numpy()):
-                    print(f"label {idx} mask result {m_idx} iou score:{score[m_idx]}")
+                    log_info(f"label {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}")
                     colored_mask = self.colorize_mask(m)
                     plt.subplot(1, 3, m_idx + 1)
                     plt.imshow(colored_mask)
@@ -333,13 +339,14 @@ class SAMWrapper:
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
-            print(f"best mask:")
+            log_info(f"best mask:")
             self.visualization(image.transpose(1, 2, 0), best_mask, input_bbox[0])
         if release_memory:
             del inputs
             del outputs
             if self.device == "cuda":
                 torch.cuda.empty_cache()
+        log_info("#"*10+"SAM Model END"+"#"*10)
         return best_mask
 
 
@@ -389,6 +396,7 @@ class XMemWrapper:
             .to(self.device)
         )
         self.processor = InferenceCore(self.network, config=self.config)
+        self.initilized = False
 
     # deprecated
     def load_model(self):
@@ -426,6 +434,7 @@ class XMemWrapper:
         return frame_norm, frame
 
     def process_first_frame(self, first_frame, mask, verbose=False, inv_resize_to=None):
+        log_info("#"*10+"XMEM Model START"+"#"*10)
         """
         Load model and process the first frame.
         Args:
@@ -435,7 +444,7 @@ class XMemWrapper:
         assert len(mask.shape) == 2, f"mask dim should be HxW, got {len(mask.shape)} of {mask.shape}"
         unique_labels = np.unique(mask)
         self.num_objects = len(unique_labels) - 1
-        print(f"detect {self.num_objects} objects in mask")
+        log_info(f"detect {self.num_objects} objects in mask")
         self.processor.set_all_labels(
             range(1, self.num_objects + 1)
         )  # consecutive labels
@@ -444,10 +453,10 @@ class XMemWrapper:
             new_label: original_label
             for new_label, original_label in enumerate(unique_labels, start=0)
         }
-        print(f'label mapping dict:{self.label_mapping}')
+        log_info(f'label mapping dict:{self.label_mapping}')
         # Create a mapping from original labels to new labels
         self.inverse_label_mapping = {v: k for k, v in self.label_mapping.items()}
-        print(f'inv label mapping dict:{self.inverse_label_mapping}')
+        log_info(f'inv label mapping dict:{self.inverse_label_mapping}')
 
         self.frame_idx = 0
         with torch.cuda.amp.autocast(enabled=True):
@@ -460,6 +469,8 @@ class XMemWrapper:
             )
             # the background mask is not fed into the model
             prediction = self.processor.step(frame_torch, mask_torch[1:])
+            # show gpu memory usage
+            get_memory_usage()
             prediction = torch_prob_to_numpy_mask(prediction)
             if verbose:
                 visualization_by_individual = overlay_davis(
@@ -479,6 +490,8 @@ class XMemWrapper:
             del frame_torch, mask_torch
             if self.device == "cuda":
                 torch.cuda.empty_cache()
+            self.initilized = True
+            log_info("#"*10+"XMEM Model END"+"#"*10)
             return prediction
 
     def process_frame(
@@ -490,11 +503,16 @@ class XMemWrapper:
             release_video_memory_every_step: bool, whether to release video memory every step,
             it may slow down the process while save memory a little bit
         """
+        if not self.initilized:
+            log_info("XMemWrapper is not initilized, maybe because the first frame is not processed yet or the mask of first frame is empty, so we will return an empty mask", color=bcolors.WARNING)
+            return np.zeros(inv_resize_to[-2:], dtype=np.uint32) # return an empty mask
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
             prediction = torch_prob_to_numpy_mask(prediction)  # uint8 ndarray
             if verbose and self.frame_idx % self.verbose_frame_every == 0:
+                # show gpu memory usage
+                get_memory_usage()
                 visualization_by_individual = overlay_davis(
                     frame.transpose(1, 2, 0), prediction,
                 )

@@ -1,8 +1,9 @@
 from typing import List
 import numpy as np
-import cv2, warnings
+import cv2, warnings, torch
+from torchvision.transforms import Resize
 
-from .utils import get_device
+from .utils import get_device, log_info, bcolors
 from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 
@@ -28,17 +29,20 @@ class VLM:
         category_multiplier=100,
         verbose = None,
         verbose_frame_every = 10,
+        input_batch_size=1,
     ) -> None:
         self.device = device
         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
         self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
-        self.xmem_wrapper = XMemWrapper(
-            xmem_model_path,
-            device=self.device,
-            resnet_18_path=resnet_18_path,
-            resnet_50_path=resnet_50_path,
-            verbose_frame_every=verbose_frame_every
-        )
+        self.xmem_wrappers = [] # to restore the xmem_wrapper for each different input
+        for i in range(input_batch_size):
+            self.xmem_wrappers.append(XMemWrapper(
+                xmem_model_path,
+                device=self.device,
+                resnet_18_path=resnet_18_path,
+                resnet_50_path=resnet_50_path,
+                verbose_frame_every=verbose_frame_every
+            ))
         if resize_to is not None:
             self.first_frame_resize_to = (
                 resize_to[0] if len(resize_to) == 2 else resize_to
@@ -55,16 +59,12 @@ class VLM:
 
     def _resize_frame(self, frame, resize_to):
         # resize frame by the shortest side
+        frame = torch.from_numpy(frame)
         if resize_to is not None:
             assert isinstance(resize_to, int)
-            frame = frame.transpose(1, 2, 0)  # transpose to h,w,c
-            h, w = frame.shape[:2]
-            if h < w:
-                frame = cv2.resize(frame, (resize_to, int(resize_to * h / w)))
-            else:
-                frame = cv2.resize(frame, (int(resize_to * w / h), resize_to))
-            frame = frame.transpose(2, 0, 1)  # transpose back to c,h,w
-        return frame
+            resize = Resize(resize_to)
+            frame = resize(frame)
+        return frame.numpy()
 
     def process_first_frame(
         self,
@@ -78,58 +78,75 @@ class VLM:
     ):
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.first_frame_resize_to if resize_to is None else resize_to
-        self.original_frame_shape = frame.shape
-        frame = self._resize_frame(frame, resize_to)
-        if self.original_frame_shape != frame.shape:
-            warnings.warn(f"the frame shape has been changed by resizing, {self.original_frame_shape} -> {frame.shape}, so we will resize the finnal mask to the original shape, which may cause some problems.")
+        if len(frame.shape) == 3:
+            frames = np.expand_dims(frame, 0)
+        else: frames = frame
+
+        self.original_frame_shape = frames.shape
+        frames = self._resize_frame(frames, resize_to)
+        if self.original_frame_shape != frames.shape:
+            warnings.warn(f"the frame shape has been changed by resizing, {self.original_frame_shape} -> {frames.shape}, so we will resize the finnal mask to the original shape, which may cause some problems.")
         else:
             self.original_frame_shape = None
-        owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
-            frame,
-            target_objects,
-            threshold=owlv2_threshold,
-            verbose=verbose,
-            release_memory=release_video_memory,
-        )
-        total_mask = np.zeros((frame.shape[1], frame.shape[2])) # 用于存储sam的结果, shape: (h, w)
-        # 对每个类别进行循环
-        for i, label in enumerate(set(owlv2_labels)):
-            # 获取当前类别的bbox
-            current_bboxes = [
-                bbox for bbox, lbl in zip(owlv2_bboxes, owlv2_labels) if lbl == label
-            ]
-            sam_input_bboxes = [current_bboxes]
-            sam_input_bpoints = [
-                [
-                    [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
-                    for bbox in current_bboxes
-                ]
-            ]  # every bbox only has one point
-            print(current_bboxes)
-            print(sam_input_bboxes)
-            print(sam_input_bpoints)
-            sam_input_lables = [[[1] * len(current_bboxes)]]
-            # 调用sam_wrapper.predict
-            sam_result = self.sam_wrapper.predict(
+        assert frames.shape[0] == len(self.xmem_wrappers), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        ret_value = []
+        for i, xmem_wrapper in enumerate(self.xmem_wrappers):
+            frame = frames[i, ...]
+            owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
                 frame,
-                input_bbox=sam_input_bboxes,
-                input_points=sam_input_bpoints,
-                input_labels=sam_input_lables,
-                threshold=sam_threshold,
+                target_objects,
+                threshold=owlv2_threshold,
                 verbose=verbose,
                 release_memory=release_video_memory,
             )
-            # 将sam_result加上类别前缀标签
-            sam_result = sam_result.astype(np.uint32)
-            sam_result[sam_result > 0] += (
-                (label + 1) * self.category_multiplier
+            if len(owlv2_bboxes) == 0:
+                log_info(f"no target objects found in frame {i}, so we will skip this frame", color=bcolors.WARNING)
+                empty_mask = np.zeros(self.original_frame_shape[-2:] if self.original_frame_shape is not None else frame.shape[-2:], dtype=np.uint32)
+                ret_value.append(empty_mask) # add a empty mask (all background)
+                # xmem_wrapper.process_first_frame(
+                #     frame, total_mask, verbose=verbose, inv_resize_to=self.original_frame_shape
+                # )
+                continue
+            total_mask = np.zeros((frame.shape[1], frame.shape[2])) # 用于存储sam的结果, shape: (h, w)
+            # 对每个类别进行循环
+            for i, label in enumerate(set(owlv2_labels)):
+                # 获取当前类别的bbox
+                current_bboxes = [
+                    bbox for bbox, lbl in zip(owlv2_bboxes, owlv2_labels) if lbl == label
+                ]
+                sam_input_bboxes = [current_bboxes]
+                sam_input_bpoints = [
+                    [
+                        [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
+                        for bbox in current_bboxes
+                    ]
+                ]  # every bbox only has one point
+                # print(current_bboxes)
+                # print(sam_input_bboxes)
+                # print(sam_input_bpoints)
+                sam_input_lables = [[[1] * len(current_bboxes)]]
+                # 调用sam_wrapper.predict
+                sam_result = self.sam_wrapper.predict(
+                    frame,
+                    input_bbox=sam_input_bboxes,
+                    input_points=sam_input_bpoints,
+                    input_labels=sam_input_lables,
+                    threshold=sam_threshold,
+                    verbose=verbose,
+                    release_memory=release_video_memory,
+                )
+                # 将sam_result加上类别前缀标签
+                sam_result = sam_result.astype(np.uint32)
+                sam_result[sam_result > 0] += (
+                    (label + 1) * self.category_multiplier
+                )
+                total_mask +=  sam_result
+            total_mask = total_mask.astype(np.uint32)
+            first_mask = xmem_wrapper.process_first_frame(
+                frame, total_mask, verbose=verbose, inv_resize_to=self.original_frame_shape
             )
-            total_mask +=  sam_result
-        total_mask = total_mask.astype(np.uint32)
-        first_mask = self.xmem_wrapper.process_first_frame(
-            frame, total_mask, verbose=verbose, inv_resize_to=self.original_frame_shape
-        )
-        return first_mask
+            ret_value.append(first_mask)
+        return ret_value
 
     def process_frame(
         self,
@@ -140,93 +157,102 @@ class VLM:
     ):
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.frame_resize_to if resize_to is None else resize_to
-        frame = self._resize_frame(frame, resize_to)
-        mask = self.xmem_wrapper.process_frame(
-            frame, verbose=verbose, release_video_memory_every_step=release_video_memory, inv_resize_to=self.original_frame_shape
-        )
-        return mask
+        if len(frame.shape) == 3:
+            frames = np.expand_dims(frame, 0)
+        else:
+            frames = frame
 
-    def reset(self):
-        pass
-
-
-class VLMM:
-    """
-    vlm pipeline concanates the three models: owlv2, sam, and xmem for batch frames
-
-    Args:
-        owlv2_model_path (str): path to the owlv2 model
-        sam_model_path (str): path to the sam model
-        xmem_model_path (str): path to the xmem model
-    """
-
-    def __init__(
-        self,
-        owlv2_model_path,
-        sam_model_path,
-        xmem_model_path,
-        resnet_18_path=None,
-        resnet_50_path=None,
-        batch_size=1,
-        device=get_device(),
-    ) -> None:
-        self.device = device
-        self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
-        self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
-        self.xmem_wrapper = XMemWrapper(
-            xmem_model_path,
-            device=self.device,
-            resnet_18_path=resnet_18_path,
-            resnet_50_path=resnet_50_path,
-        )
-
-    def process_first_frame(
-        self,
-        target_objects: List[str],
-        frame: np.ndarray,
-        owlv2_threshold=0.2,
-        sam_threshold=0.5,
-        verbose=False,
-        release_video_memory=True,
-    ):
-        owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
-            frame,
-            target_objects,
-            threshold=owlv2_threshold,
-            verbose=verbose,
-            release_memory=release_video_memory,
-        )
-        sam_input_bboxes = [owlv2_bboxes]
-        sam_input_bpoints = [
-            list(
-                [
-                    [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
-                    for bbox in owlv2_bboxes  # every bbox only has one point
-                ]
+        frames = self._resize_frame(frames, resize_to)
+        ret_value = []
+        for i, xmem_wrapper in enumerate(self.xmem_wrappers):
+            frame = frames[i, ...]
+            mask = xmem_wrapper.process_frame(
+                frame, verbose=verbose, release_video_memory_every_step=release_video_memory, inv_resize_to=self.original_frame_shape
             )
-        ]
-        sam_input_lables = [[[1] * len(owlv2_labels)]]
-        sam_results = self.sam_wrapper.predict(
-            frame,
-            input_bbox=sam_input_bboxes,
-            input_points=sam_input_bpoints,
-            input_labels=sam_input_lables,
-            threshold=sam_threshold,
-            verbose=verbose,
-            release_memory=release_video_memory,
-        )
-        first_mask = self.xmem_wrapper.process_first_frame(
-            frame, sam_results, verbose=verbose
-        )
-        return first_mask
-
-    def process_frame(
-        self, frame: np.ndarray, verbose=False, release_video_memory=False
-    ):
-        mask = self.xmem_wrapper.process_frame(
-            frame, verbose=verbose, release_video_memory_every_step=release_video_memory
-        )
-        return mask
+            ret_value.append(mask)
+        return ret_value
 
     def reset(self):
         pass
+
+
+# class VLMM:
+#     """
+#     vlm pipeline concanates the three models: owlv2, sam, and xmem for batch frames
+
+#     Args:
+#         owlv2_model_path (str): path to the owlv2 model
+#         sam_model_path (str): path to the sam model
+#         xmem_model_path (str): path to the xmem model
+#     """
+
+#     def __init__(
+#         self,
+#         owlv2_model_path,
+#         sam_model_path,
+#         xmem_model_path,
+#         resnet_18_path=None,
+#         resnet_50_path=None,
+#         batch_size=1,
+#         device=get_device(),
+#     ) -> None:
+#         self.device = device
+#         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
+#         self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
+#         self.xmem_wrapper = XMemWrapper(
+#             xmem_model_path,
+#             device=self.device,
+#             resnet_18_path=resnet_18_path,
+#             resnet_50_path=resnet_50_path,
+#         )
+
+#     def process_first_frame(
+#         self,
+#         target_objects: List[str],
+#         frame: np.ndarray,
+#         owlv2_threshold=0.2,
+#         sam_threshold=0.5,
+#         verbose=False,
+#         release_video_memory=True,
+#     ):
+#         owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
+#             frame,
+#             target_objects,
+#             threshold=owlv2_threshold,
+#             verbose=verbose,
+#             release_memory=release_video_memory,
+#         )
+#         sam_input_bboxes = [owlv2_bboxes]
+#         sam_input_bpoints = [
+#             list(
+#                 [
+#                     [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
+#                     for bbox in owlv2_bboxes  # every bbox only has one point
+#                 ]
+#             )
+#         ]
+#         sam_input_lables = [[[1] * len(owlv2_labels)]]
+#         sam_results = self.sam_wrapper.predict(
+#             frame,
+#             input_bbox=sam_input_bboxes,
+#             input_points=sam_input_bpoints,
+#             input_labels=sam_input_lables,
+#             threshold=sam_threshold,
+#             verbose=verbose,
+#             release_memory=release_video_memory,
+#         )
+#         first_mask = self.xmem_wrapper.process_first_frame(
+#             frame, sam_results, verbose=verbose
+#         )
+#         return first_mask
+
+#     def process_frame(
+#         self, frame: np.ndarray, verbose=False, release_video_memory=False
+#     ):
+#         mask = self.xmem_wrapper.process_frame(
+#             frame, verbose=verbose, release_video_memory_every_step=release_video_memory
+#         )
+#         return mask
+
+#     def reset(self):
+#         pass
