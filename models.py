@@ -20,7 +20,7 @@ from .XMem.inference.interact.interactive_utils import (
     overlay_davis,
 )
 
-from .utils import trans_bbox, get_memory_usage, bcolors, get_clock_time, log_info
+from .utils import trans_bbox, get_memory_usage, bcolors, get_clock_time, log_info,is_notebook
 from .datasets import VideoDataset
 
 
@@ -360,6 +360,7 @@ class XMemWrapper:
         resnet_50_path=None,
         device="cpu",
         verbose_frame_every=10,
+        name = None
     ):
         self.model_path = model_path
         self.video_path = video_path
@@ -397,7 +398,8 @@ class XMemWrapper:
         )
         self.processor = InferenceCore(self.network, config=self.config)
         self.initilized = False
-
+        self._name = name if name is not None else id(self)
+        self._is_nootbook  = is_notebook()
     # deprecated
     def load_model(self):
         import warnings
@@ -434,7 +436,7 @@ class XMemWrapper:
         return frame_norm, frame
 
     def process_first_frame(self, first_frame, mask, verbose=False, inv_resize_to=None):
-        log_info("#"*10+"XMEM Model START"+"#"*10)
+        log_info("#"*10+f"XMEM Model [{self._name}] START"+"#"*10)
         """
         Load model and process the first frame.
         Args:
@@ -476,7 +478,11 @@ class XMemWrapper:
                 visualization_by_individual = overlay_davis(
                     first_frame.transpose(1, 2, 0), prediction
                 )
-                display(Image.fromarray(visualization_by_individual))
+                if self._is_nootbook:
+                    display(Image.fromarray(visualization_by_individual))
+                else:
+                    plt.imshow(visualization_by_individual)
+                    plt.show()
             prediction = cv2.resize(
                 prediction, inv_resize_to[-2:], interpolation=cv2.INTER_NEAREST
             ) if inv_resize_to is not None else prediction
@@ -484,14 +490,18 @@ class XMemWrapper:
                 visualization_by_individual = overlay_davis(
                     cv2.resize(first_frame.transpose(1, 2, 0),inv_resize_to[-2:]), prediction
                 )
-                display(Image.fromarray(visualization_by_individual))
+                if self._is_nootbook:
+                    display(Image.fromarray(visualization_by_individual))
+                else:
+                    plt.imshow(visualization_by_individual)
+                    plt.show()
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
             del frame_torch, mask_torch
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             self.initilized = True
-            log_info("#"*10+"XMEM Model END"+"#"*10)
+            log_info("#"*10+f"XMEM Model [{self._name}] END"+"#"*10)
             return prediction
 
     def process_frame(
@@ -504,8 +514,8 @@ class XMemWrapper:
             it may slow down the process while save memory a little bit
         """
         if not self.initilized:
-            log_info("XMemWrapper is not initilized, maybe because the first frame is not processed yet or the mask of first frame is empty, so we will return an empty mask", color=bcolors.WARNING)
-            return np.zeros(inv_resize_to[-2:], dtype=np.uint32) # return an empty mask
+            log_info(f"XMemWrapper[{self._name}] is not initilized, maybe because the first frame is not processed yet or the mask of first frame is empty, so we will return an empty mask", color=bcolors.WARNING)
+            return np.zeros(inv_resize_to[-2:] if inv_resize_to is not None else frame.shape[-2:], dtype=np.uint32) # return an empty mask
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
