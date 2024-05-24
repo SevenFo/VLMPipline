@@ -9,14 +9,9 @@ from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 class VLM:
     """
-    vlm pipeline concanates the three models: owlv2, sam, and xmem
-
-    Args:
-        owlv2_model_path (str): path to the owlv2 model
-        sam_model_path (str): path to the sam model
-        xmem_model_path (str): path to the xmem model
+    vlm pipeline concanates the three models: owlv2, sam, and xmem for batch frames
     """
-
+    
     def __init__(
         self,
         owlv2_model_path,
@@ -27,22 +22,41 @@ class VLM:
         device=get_device(),
         resize_to=(480, 480),
         category_multiplier=100,
-        verbose = None,
-        verbose_frame_every = 10,
+        verbose=None,
+        verbose_frame_every=10,
         input_batch_size=1,
     ) -> None:
+        """
+        Initializes the VLM (VoxPoser Landmark) object.
+
+        Args:
+            owlv2_model_path (str): The file path to the Owlv2 model.
+            sam_model_path (str): The file path to the SAM model.
+            xmem_model_path (str): The file path to the XMem model.
+            resnet_18_path (str, optional): The file path to the ResNet-18 model. Defaults to None.
+            resnet_50_path (str, optional): The file path to the ResNet-50 model. Defaults to None.
+            device (str, optional): The device to use for computation. Defaults to the current device.
+            resize_to (tuple, optional): The size to resize the frames to in two stages, first for the first frame and then for the rest of the frames. All are resized to the shortest side. Defaults to (480, 480).
+            category_multiplier (int, optional): The multiplier to scale the SAM results. Defaults to 100.
+            verbose (bool, optional): Whether to enable verbose mode. Defaults to None.
+            verbose_frame_every (int, optional): The frequency of verbose frame output. Defaults to 10.
+            input_batch_size (int, optional): The batch size for input frames. Defaults to 1.
+        """
         self.device = device
         self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
         self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
-        self.xmem_wrappers = [] # to restore the xmem_wrapper for each different input
+        self.xmem_wrappers = []  # to restore the xmem_wrapper for each different input
         for i in range(input_batch_size):
-            self.xmem_wrappers.append(XMemWrapper(
-                xmem_model_path,
-                device=self.device,
-                resnet_18_path=resnet_18_path,
-                resnet_50_path=resnet_50_path,
-                verbose_frame_every=verbose_frame_every
-            ))
+            self.xmem_wrappers.append(
+                XMemWrapper(
+                    xmem_model_path,
+                    device=self.device,
+                    resnet_18_path=resnet_18_path,
+                    resnet_50_path=resnet_50_path,
+                    verbose_frame_every=verbose_frame_every,
+                    name=f"{i}",
+                )
+            )
         if resize_to is not None:
             self.first_frame_resize_to = (
                 resize_to[0] if len(resize_to) == 2 else resize_to
@@ -76,19 +90,44 @@ class VLM:
         release_video_memory=True,
         resize_to=None,
     ):
+        """
+        Process the first frame of a video sequence.
+
+        Args:
+            target_objects (List[str]): List of target object names.
+            frame (np.ndarray): The first frame of the video sequence. 
+            owlv2_threshold (float, optional): Threshold for object detection using OWLv2. Defaults to 0.2.
+            sam_threshold (float, optional): Threshold for object segmentation using SAM. Defaults to 0.5.
+            verbose (bool, optional): Whether to print verbose output. Defaults to False.
+            release_video_memory (bool, optional): Whether to release video memory after processing. Defaults to True.
+            resize_to (tuple, optional): The desired size to resize the frame. Defaults to None.
+
+        Returns:
+            List[np.ndarray]: A list of masks representing the first frame processed for each target object.
+        
+        Note:
+            frame: The frame is represented as a numpy array. shape: (c, h, w) or (b, c, h, w), where b is the batch size.
+            The masks are represented as numpy arrays.
+        """
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.first_frame_resize_to if resize_to is None else resize_to
         if len(frame.shape) == 3:
-            frames = np.expand_dims(frame, 0)
-        else: frames = frame
-
+            frames = np.expand_dims(frame, 0) # shape: (1, h, w, c)
+        else:
+            frames = frame
+        # record the original frame shape
         self.original_frame_shape = frames.shape
+        # resize the frame to the target size by the shortest side
         frames = self._resize_frame(frames, resize_to)
         if self.original_frame_shape != frames.shape:
-            warnings.warn(f"the frame shape has been changed by resizing, {self.original_frame_shape} -> {frames.shape}, so we will resize the finnal mask to the original shape, which may cause some problems.")
+            warnings.warn(
+                f"the frame shape has been changed by resizing, {self.original_frame_shape} -> {frames.shape}, so we will resize the finnal mask to the original shape, which may cause some problems."
+            )
         else:
             self.original_frame_shape = None
-        assert frames.shape[0] == len(self.xmem_wrappers), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        assert (
+            frames.shape[0] == len(self.xmem_wrappers)
+        ), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
         ret_value = []
         for i, xmem_wrapper in enumerate(self.xmem_wrappers):
             frame = frames[i, ...]
@@ -100,19 +139,31 @@ class VLM:
                 release_memory=release_video_memory,
             )
             if len(owlv2_bboxes) == 0:
-                log_info(f"no target objects found in frame {i}, so we will skip this frame", color=bcolors.WARNING)
-                empty_mask = np.zeros(self.original_frame_shape[-2:] if self.original_frame_shape is not None else frame.shape[-2:], dtype=np.uint32)
-                ret_value.append(empty_mask) # add a empty mask (all background)
+                log_info(
+                    f"no target objects found in frame {i}, so we will skip this frame",
+                    color=bcolors.WARNING,
+                )
+                empty_mask = np.zeros(
+                    self.original_frame_shape[-2:]
+                    if self.original_frame_shape is not None
+                    else frame.shape[-2:],
+                    dtype=np.uint32,
+                )
+                ret_value.append(empty_mask)  # add a empty mask (all background)
                 # xmem_wrapper.process_first_frame(
                 #     frame, total_mask, verbose=verbose, inv_resize_to=self.original_frame_shape
                 # )
                 continue
-            total_mask = np.zeros((frame.shape[1], frame.shape[2])) # 用于存储sam的结果, shape: (h, w)
+            total_mask = np.zeros(
+                (frame.shape[1], frame.shape[2])
+            )  # 用于存储sam的结果, shape: (h, w)
             # 对每个类别进行循环
             for i, label in enumerate(set(owlv2_labels)):
                 # 获取当前类别的bbox
                 current_bboxes = [
-                    bbox for bbox, lbl in zip(owlv2_bboxes, owlv2_labels) if lbl == label
+                    bbox
+                    for bbox, lbl in zip(owlv2_bboxes, owlv2_labels)
+                    if lbl == label
                 ]
                 sam_input_bboxes = [current_bboxes]
                 sam_input_bpoints = [
@@ -137,13 +188,14 @@ class VLM:
                 )
                 # 将sam_result加上类别前缀标签
                 sam_result = sam_result.astype(np.uint32)
-                sam_result[sam_result > 0] += (
-                    (label + 1) * self.category_multiplier
-                )
-                total_mask +=  sam_result
+                sam_result[sam_result > 0] += (label + 1) * self.category_multiplier
+                total_mask += sam_result
             total_mask = total_mask.astype(np.uint32)
             first_mask = xmem_wrapper.process_first_frame(
-                frame, total_mask, verbose=verbose, inv_resize_to=self.original_frame_shape
+                frame,
+                total_mask,
+                verbose=verbose,
+                inv_resize_to=self.original_frame_shape,
             )
             ret_value.append(first_mask)
         return ret_value
@@ -167,7 +219,10 @@ class VLM:
         for i, xmem_wrapper in enumerate(self.xmem_wrappers):
             frame = frames[i, ...]
             mask = xmem_wrapper.process_frame(
-                frame, verbose=verbose, release_video_memory_every_step=release_video_memory, inv_resize_to=self.original_frame_shape
+                frame,
+                verbose=verbose,
+                release_video_memory_every_step=release_video_memory,
+                inv_resize_to=self.original_frame_shape,
             )
             ret_value.append(mask)
         return ret_value

@@ -90,7 +90,24 @@ def get_visualization_torch(mode, image, prob, layer, target_object):
 
 
 def overlay_davis(image, mask, alpha=0.5, fade=False):
-    """Overlay segmentation on top of RGB image. from davis official"""
+    """
+    Overlay segmentation on top of RGB image.
+
+    Args:
+        image (numpy.ndarray): The RGB image.
+        mask (numpy.ndarray): The segmentation mask.
+        alpha (float, optional): The transparency of the overlay. Defaults to 0.5.
+        fade (bool, optional): Whether to fade the non-segmented regions. Defaults to False.
+
+    Returns:
+        numpy.ndarray: The image with the segmentation overlay.
+        
+    Note:
+        This function changes the image in-place to avoid copying.
+        image: H*W*3 numpy array
+        mask: H*W numpy array
+
+    """
     im_overlay = image.copy()
 
     colored_mask = color_map_np[mask]
