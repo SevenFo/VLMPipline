@@ -1,21 +1,25 @@
-import torch, datetime
+import torch
+import datetime
 from torchvision import transforms
 import numpy as np
+from PIL import Image
 import open3d as o3d
+
 
 def is_notebook() -> bool:
     # return False
     try:
         shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
-            return True   # Jupyter notebook or qtconsole
-        elif shell == 'TerminalInteractiveShell':
+        if shell == "ZMQInteractiveShell":
+            return True  # Jupyter notebook or qtconsole
+        elif shell == "TerminalInteractiveShell":
             return False  # Terminal running IPython
         else:
             return False  # Other type (?)
     except NameError:
-        return False      # Probably standard Python interpreter
-    
+        return False  # Probably standard Python interpreter
+
+
 class bcolors:
     HEADER = "\033[95m"
     OKBLUE = "\033[94m"
@@ -27,6 +31,7 @@ class bcolors:
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
 
+
 def get_clock_time(milliseconds=False):
     curr_time = datetime.datetime.now()
     if milliseconds:
@@ -34,13 +39,15 @@ def get_clock_time(milliseconds=False):
     else:
         return f"{curr_time.hour}:{curr_time.minute}:{curr_time.second}"
 
+
 def log_info(info, color=bcolors.OKGREEN):
     print(f"{color}[VLM INFO|{get_clock_time()}] {info}{bcolors.ENDC}")
+
 
 def get_device():
     if torch.cuda.is_available():
         print("Using GPU")
-        device = "cuda"
+        device = "cuda:1"
     else:
         print("CUDA not available. Please connect to a GPU instance if possible.")
         device = "cpu"
@@ -91,6 +98,7 @@ def free_video_memory(*variables_to_del, device="cuda"):
         f"total memory (in MB): {t/1024/1024}, reserved memory (in MB): {r/1024/1024}, allocated memory (in MB): {a/1024/1024}"
     )
 
+
 def get_memory_usage(device="cuda"):
     """
     Get memory usage
@@ -114,6 +122,38 @@ def _transform(coords, trans):
     transformed_coords_vector = np.matmul(trans, coords)
     transformed_coords_vector = np.transpose(transformed_coords_vector, (1, 0))
     return np.reshape(transformed_coords_vector, (h, w, -1))
+
+
+def resize_mask(mask, size):
+    """
+    Resize a mask to the specified size.
+
+    Args:
+        mask (numpy.ndarray): The input mask. shape (height, width)
+        size (tuple): The desired size of the mask. shape (height, width)
+
+    Returns:
+        numpy.array: The resized mask.
+    """
+    mask = torch.from_numpy(mask).unsqueeze(0)
+    resize_func = transforms.Resize(size, interpolation=Image.NEAREST)
+    return resize_func(mask).squeeze(0).numpy()
+
+
+def resize_rgb(rgb, size):
+    """
+    Resize an RGB image to the specified size.
+
+    Args:
+        rgb (numpy.ndarray): The input RGB image. shape (3, height, width)
+        size (tuple): The desired size of the RGB image. shape (height, width)
+
+    Returns:
+        numpy.array: The resized RGB image.
+    """
+    rgb = torch.from_numpy(rgb)
+    resize_func = transforms.Resize(size, interpolation=Image.BILINEAR)
+    return resize_func(rgb).numpy()
 
 
 def _pixel_to_world_coords(pixel_coords, cam_proj_mat_inv):
@@ -168,17 +208,20 @@ def convert_depth_to_pointcloud(
     clip_far=3.5,
     clip_near=0.05,
     mask=None,
-    return_points = True,
+    return_points=True,
 ):
     """
     padding can be 0 (None) or 255 (the farthest boundary)
     """
     if depth_image.dtype == np.float32:
-        depth_in_meters = np.array(depth_image, dtype=np.float64) * (clip_far - clip_near)+ clip_near  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
+        depth_in_meters = (
+            np.array(depth_image, dtype=np.float64) * (clip_far - clip_near) + clip_near
+        )  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
     elif depth_image.dtype == np.uint8:
         depth_in_meters = (
-        np.array(depth_image, dtype=np.float64) / 255 * (clip_far - clip_near)
-        ) + clip_near  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
+            (np.array(depth_image, dtype=np.float64) / 255 * (clip_far - clip_near))
+            + clip_near
+        )  # 这里有点问题，实际上应该是 depth_m = near + depth * (far - near)
     else:
         raise ValueError(f"not support depth_image type:{depth_image.dtype}")
     pcl = pointcloud_from_depth_and_camera_params(

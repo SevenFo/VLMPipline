@@ -2,6 +2,7 @@ import cv2
 from PIL import Image
 import numpy as np
 import torch
+from torchvision.transforms import Resize
 import matplotlib.pyplot as plt
 from transformers import Owlv2Processor, Owlv2ForObjectDetection
 from transformers import SamModel, SamProcessor
@@ -20,7 +21,16 @@ from .XMem.inference.interact.interactive_utils import (
     overlay_davis,
 )
 
-from .utils import trans_bbox, get_memory_usage, bcolors, get_clock_time, log_info,is_notebook
+from .utils import (
+    trans_bbox,
+    get_memory_usage,
+    bcolors,
+    get_clock_time,
+    log_info,
+    is_notebook,
+    resize_mask,
+    resize_rgb,
+)
 from .datasets import VideoDataset
 
 
@@ -36,11 +46,22 @@ class Owlv2Wrapper:
 
     def visualization(self, result, image, labels):
         """
-        @params: result: list of tuple (box, score, label), box: [x1, y1, x2, y2]
-        @params: image: numpy array (h, w, c)
-        @params: labels: list of str
-        @return: None
-        @description: visualize the result
+        Visualize the result of object detection on an image.
+
+        Args:
+            result (list): List of tuples (box, score, label), where box is a list of [x1, y1, x2, y2].
+            image (numpy.ndarray): The input image as a numpy array with shape (h, w, c).
+            labels (list): List of strings representing the labels for the detected objects.
+
+        Returns:
+            None
+
+        Raises:
+            AssertionError: If the image is not in RGB format.
+
+        Description:
+            This method visualizes the result of object detection on an image. It plots the image and overlays
+            bounding boxes around the detected objects, along with their corresponding labels and confidence scores.
         """
         assert image.shape[-1] == 3, "image should be RGB format"
         plt.figure()
@@ -48,7 +69,9 @@ class Owlv2Wrapper:
         for box, score, label in result:
             box = [round(i, 2) for i in box]
             box = trans_bbox(box)
-            log_info(f"Detected {labels[label]} with confidence {round(score, 3)} at location {[round(i, 2) for i in box]}")
+            log_info(
+                f"Detected {labels[label]} with confidence {round(score, 3)} at location {[round(i, 2) for i in box]}"
+            )
             plt.gca().add_patch(
                 plt.Rectangle(
                     (box[0], box[1]),
@@ -61,75 +84,29 @@ class Owlv2Wrapper:
             )
         plt.show()
 
-    def predictm(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
-        """
-        @params: image: numpy array, only accept batch RGB image
-        @params: texts: list of list of str or a list of str or single str
-        @params: threshold: float
-        @return: list of tuple (box, score, label)
-        @description: predict the result
-        """
-        # check image format
-        assert (
-            image.shape[1] == 3 and len(image.shape) == 4
-        ), "image should be RGB format with shape (b, c, h, w)"
-        assert (
-            type(texts) == list and type(texts[0]) == list
-        ), "texts should be list of list of str"
-        # preprocess image
-        inputs = self.processor(text=texts, images=image, return_tensors="pt").to(
-            self.device
-        )
-        # inference
-        outputs = self.model(**inputs)
-        # Target image sizes (height, width) to rescale box predictions [batch_size, 2]
-        target_sizes = torch.Tensor(
-            [[np.max(image.shape[-2:]), np.max(image.shape[-2:])]]
-        ).to(self.device)
-        results = self.processor.post_process_object_detection(
-            outputs=outputs, threshold=threshold, target_sizes=target_sizes
-        )
-
-        # get boxes score and labels
-        boxes = results["boxes"].tolist()  # [[(x1, y1, x2, y2), ...)]] b, r, 4
-        scores = results["scores"].tolist()  # b, r, 4
-        labels = results["labels"].tolist()  # b, r, 4
-        all = list(zip(boxes, scores, labels))
-        if verbose:
-            # print(f"{bcolors.OKGREEN}[VLM INFO | {get_c}] Detect object: {texts}")
-            print(f"Detected {len(all)} objects, boxes, scores, labels are: {all}")
-            self.visualization(all, image.transpose(1, 2, 0), labels)
-        # score_recorder = {}
-        # best = {}
-        # for box, score, label in all:
-        #     if str(label) not in score_recorder.keys():
-        #         score_recorder.update({str(label):score})
-        #     else:
-        #         if score_recorder[str(label)] > score:
-        #             continue
-        #     score_recorder[str(label)] = score
-        #     best.update({str(label):{'score':score,'bbox':box}})
-        #     print(score_recorder)
-        # best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
-        if release_memory:
-            del inputs
-            del outputs
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-            torch.cuda.empty_cache()
-        return (boxes, scores, labels)
-
     def predict(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
         """
-        @params: image: numpy array, only accept one RGB image
-        @params: texts: list of list of str or a list of str or single str
-        @params: threshold: float
-        @return: list of tuple (box, score, label)
-        @description: predict the result
+        Predicts the result for the given image and texts.
+
+        Args:
+            image (numpy array): Only accepts one RGB image.
+            texts (list of list of str or list of str or str): The texts to be used for prediction.
+            threshold (float): The threshold value for prediction. Defaults to 0.5.
+            verbose (bool): If True, displays additional information during prediction. Defaults to False.
+            release_memory (bool): If True, releases memory after prediction. Defaults to True.
+
+        Returns:
+            list of tuple: A list of tuples containing the predicted boxes, scores, and labels.
+
+        Raises:
+            AssertionError: If the image is not in RGB format with shape (c, h, w).
+
         """
-        log_info("#"*10+"Owlv2 Model START"+"#"*10)
+        log_info("#" * 10 + "Owlv2 Model START" + "#" * 10)
         # check image format
-        assert image.shape[0] == 3 and len(image.shape) == 3, "image should be RGB format with shape (c, h, w)"
+        assert (
+            image.shape[0] == 3 and len(image.shape) == 3
+        ), "image should be RGB format with shape (c, h, w)"
         # preprocess image
         inputs = self.processor(text=texts, images=image, return_tensors="pt").to(
             self.device
@@ -175,7 +152,7 @@ class Owlv2Wrapper:
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             torch.cuda.empty_cache()
-        log_info("#"*10+"Owlv2 Model END"+"#"*10)
+        log_info("#" * 10 + "Owlv2 Model END" + "#" * 10)
         return ret_value[0]
 
 
@@ -204,7 +181,6 @@ class SAMWrapper:
 
         Args:
             mask (numpy array): The mask array.
-            color_map (list): The color map.
 
         Returns:
             colored_mask (numpy array): The colored mask array.
@@ -218,7 +194,9 @@ class SAMWrapper:
             color = color_map[int(label) % len(color_map)][
                 :3
             ]  # Convert label to integer
-            log_info(f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}")
+            log_info(
+                f"label {label} use color {(np.array(color) * 255).astype(np.uint8)}"
+            )
             colored_mask[mask == label] = (np.array(color) * 255).astype(np.uint8)
         return colored_mask
 
@@ -293,7 +271,7 @@ class SAMWrapper:
         Returns:
             best_mask: The best mask.
         """
-        log_info("#"*10+"SAM Model START"+"#"*10)
+        log_info("#" * 10 + "SAM Model START" + "#" * 10)
         assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image and prompt, it seems that it provided resize function?
         inputs = self.processor(
@@ -331,7 +309,9 @@ class SAMWrapper:
             if verbose:
                 plt.figure()
                 for m_idx, m in enumerate(masks[idx].numpy()):
-                    log_info(f"label {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}")
+                    log_info(
+                        f"label {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}"
+                    )
                     colored_mask = self.colorize_mask(m)
                     plt.subplot(1, 3, m_idx + 1)
                     plt.imshow(colored_mask)
@@ -339,14 +319,14 @@ class SAMWrapper:
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
-            log_info(f"best mask:")
+            log_info("best mask:")
             self.visualization(image.transpose(1, 2, 0), best_mask, input_bbox[0])
         if release_memory:
             del inputs
             del outputs
             if self.device == "cuda":
                 torch.cuda.empty_cache()
-        log_info("#"*10+"SAM Model END"+"#"*10)
+        log_info("#" * 10 + "SAM Model END" + "#" * 10)
         return best_mask
 
 
@@ -360,7 +340,7 @@ class XMemWrapper:
         resnet_50_path=None,
         device="cpu",
         verbose_frame_every=10,
-        name = None
+        name=None,
     ):
         self.model_path = model_path
         self.video_path = video_path
@@ -399,7 +379,8 @@ class XMemWrapper:
         self.processor = InferenceCore(self.network, config=self.config)
         self.initilized = False
         self._name = name if name is not None else id(self)
-        self._is_nootbook  = is_notebook()
+        self._is_nootbook = is_notebook()
+
     # deprecated
     def load_model(self):
         import warnings
@@ -436,14 +417,29 @@ class XMemWrapper:
         return frame_norm, frame
 
     def process_first_frame(self, first_frame, mask, verbose=False, inv_resize_to=None):
-        log_info("#"*10+f"XMEM Model [{self._name}] START"+"#"*10)
         """
         Load model and process the first frame.
+
         Args:
             first_frame: nparray (C,H,W) uint8 0~255
+                The first frame of the video as a numpy array with shape (C, H, W), where C is the number of channels,
+                H is the height, and W is the width. The values should be in the range of 0 to 255.
             mask: nparray (H,W)
+                The mask for the first frame as a numpy array with shape (H, W), where H is the height and W is the width.
+            verbose: bool, optional
+                Whether to display verbose output or not. Default is False.
+            inv_resize_to: tuple, optional
+                The size to which the first frame and visualization should be resized. Should be a tuple of (height, width).
+                Default is None, which means no resizing.
+
+        Returns:
+            prediction: nparray (H,W)
+                The predicted mask for the first frame as a numpy array with shape (H, W), where H is the height and W is the width.
         """
-        assert len(mask.shape) == 2, f"mask dim should be HxW, got {len(mask.shape)} of {mask.shape}"
+        log_info("#" * 10 + f"XMEM Model [{self._name}] START" + "#" * 10)
+        assert (
+            len(mask.shape) == 2
+        ), f"mask dim should be HxW, got {len(mask.shape)} of {mask.shape}"
         unique_labels = np.unique(mask)
         self.num_objects = len(unique_labels) - 1
         log_info(f"detect {self.num_objects} objects in mask")
@@ -455,10 +451,10 @@ class XMemWrapper:
             new_label: original_label
             for new_label, original_label in enumerate(unique_labels, start=0)
         }
-        log_info(f'label mapping dict:{self.label_mapping}')
+        log_info(f"label mapping dict:{self.label_mapping}")
         # Create a mapping from original labels to new labels
         self.inverse_label_mapping = {v: k for k, v in self.label_mapping.items()}
-        log_info(f'inv label mapping dict:{self.inverse_label_mapping}')
+        log_info(f"inv label mapping dict:{self.inverse_label_mapping}")
 
         self.frame_idx = 0
         with torch.cuda.amp.autocast(enabled=True):
@@ -474,21 +470,22 @@ class XMemWrapper:
             # show gpu memory usage
             get_memory_usage()
             prediction = torch_prob_to_numpy_mask(prediction)
+            # resize the prediction to the original size
+            prediction = (
+                resize_mask(prediction, inv_resize_to[-2:])
+                if inv_resize_to is not None
+                else prediction
+            )
             if verbose:
-                visualization_by_individual = overlay_davis(
-                    first_frame.transpose(1, 2, 0), prediction
+                # reshape first_frame to H W C
+                first_frame_disp = (
+                    resize_rgb(first_frame, inv_resize_to[-2:])
+                    if inv_resize_to is not None
+                    else first_frame
                 )
-                if self._is_nootbook:
-                    display(Image.fromarray(visualization_by_individual))
-                else:
-                    plt.imshow(visualization_by_individual)
-                    plt.show()
-            prediction = cv2.resize(
-                prediction, inv_resize_to[-2:], interpolation=cv2.INTER_NEAREST
-            ) if inv_resize_to is not None else prediction
-            if verbose and inv_resize_to is not None:
+                first_frame_disp_hwc = first_frame_disp.transpose(1, 2, 0)
                 visualization_by_individual = overlay_davis(
-                    cv2.resize(first_frame.transpose(1, 2, 0),inv_resize_to[-2:]), prediction
+                    first_frame_disp_hwc, prediction
                 )
                 if self._is_nootbook:
                     display(Image.fromarray(visualization_by_individual))
@@ -501,21 +498,42 @@ class XMemWrapper:
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             self.initilized = True
-            log_info("#"*10+f"XMEM Model [{self._name}] END"+"#"*10)
+            log_info("#" * 10 + f"XMEM Model [{self._name}] END" + "#" * 10)
             return prediction
 
     def process_frame(
-        self, frame, verbose=False, release_video_memory_every_step=False, inv_resize_to=None
+        self,
+        frame,
+        verbose=False,
+        release_video_memory_every_step=False,
+        inv_resize_to=None,
     ):
         """
         Process one frame.
+
         Args:
-            release_video_memory_every_step: bool, whether to release video memory every step,
-            it may slow down the process while save memory a little bit
+            frame: The input frame to be processed. shape: (C, H, W)
+            verbose: Whether to display verbose information during processing.
+            release_video_memory_every_step: Whether to release video memory every step.
+                It may slow down the process but save memory.
+            inv_resize_to: The size to resize the prediction mask to.
+                If None, the prediction mask will not be resized.
+
+        Returns:
+            The processed prediction mask. shape: (H, W)
+
+        Raises:
+            None.
         """
         if not self.initilized:
-            log_info(f"XMemWrapper[{self._name}] is not initilized, maybe because the first frame is not processed yet or the mask of first frame is empty, so we will return an empty mask", color=bcolors.WARNING)
-            return np.zeros(inv_resize_to[-2:] if inv_resize_to is not None else frame.shape[-2:], dtype=np.uint32) # return an empty mask
+            log_info(
+                f"XMemWrapper[{self._name}] is not initilized, maybe because the first frame is not processed yet or the mask of first frame is empty, so we will return an empty mask",
+                color=bcolors.WARNING,
+            )
+            return np.zeros(
+                inv_resize_to[-2:] if inv_resize_to is not None else frame.shape[-2:],
+                dtype=np.uint32,
+            )  # return an empty mask
         with torch.cuda.amp.autocast(enabled=True):
             frame_torch, _ = self.match_image_format(frame)
             prediction = self.processor.step(frame_torch)
@@ -524,12 +542,15 @@ class XMemWrapper:
                 # show gpu memory usage
                 get_memory_usage()
                 visualization_by_individual = overlay_davis(
-                    frame.transpose(1, 2, 0), prediction,
+                    frame.transpose(1, 2, 0),
+                    prediction,
                 )
                 display(Image.fromarray(visualization_by_individual))
-            prediction = cv2.resize(
-                prediction, inv_resize_to[-2:], interpolation=cv2.INTER_NEAREST
-            ) if inv_resize_to is not None else prediction
+            prediction = (
+                resize_mask(prediction, inv_resize_to[-2:])
+                if inv_resize_to is not None
+                else prediction
+            )
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
             self.frame_idx += 1
