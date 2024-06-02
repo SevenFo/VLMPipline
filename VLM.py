@@ -1,6 +1,8 @@
 from typing import List
+import os
+import time
 import numpy as np
-import cv2, warnings, torch
+import warnings, torch
 from torchvision.transforms import Resize
 
 from .utils import get_device, log_info, bcolors
@@ -11,7 +13,7 @@ class VLM:
     """
     vlm pipeline concanates the three models: owlv2, sam, and xmem for batch frames
     """
-    
+
     def __init__(
         self,
         owlv2_model_path,
@@ -24,6 +26,8 @@ class VLM:
         category_multiplier=100,
         verbose=None,
         verbose_frame_every=10,
+        verbose_to_disk: bool = False,
+        log_dir: str = None,
         input_batch_size=1,
     ) -> None:
         """
@@ -43,8 +47,25 @@ class VLM:
             input_batch_size (int, optional): The batch size for input frames. Defaults to 1.
         """
         self.device = device
-        self.owlv2_wrapper = Owlv2Wrapper(owlv2_model_path, self.device)
-        self.sam_wrapper = SAMWrapper(sam_model_path, self.device)
+        self.log_dir = os.path.join(
+            log_dir if log_dir is not None else "./logs",
+            "vlm",
+            f"{time.strftime('%Y-%m-%d-%H-%M-%S')}",
+        )
+        if os.path.exists(self.log_dir) is False:
+            os.makedirs(self.log_dir)
+        self.owlv2_wrapper = Owlv2Wrapper(
+            owlv2_model_path,
+            self.device,
+            verbose_to_disk=verbose_to_disk,
+            log_dir=self.log_dir,
+        )
+        self.sam_wrapper = SAMWrapper(
+            sam_model_path,
+            self.device,
+            verbose_to_disk=verbose_to_disk,
+            log_dir=self.log_dir,
+        )
         self.xmem_wrappers = []  # to restore the xmem_wrapper for each different input
         for i in range(input_batch_size):
             self.xmem_wrappers.append(
@@ -54,6 +75,8 @@ class VLM:
                     resnet_18_path=resnet_18_path,
                     resnet_50_path=resnet_50_path,
                     verbose_frame_every=verbose_frame_every,
+                    verbose_to_disk=verbose_to_disk,
+                    log_dir=self.log_dir,
                     name=f"{i}",
                 )
             )
@@ -69,6 +92,7 @@ class VLM:
             category_multiplier  # 用于将sam的结果乘以一个大的常数，然后加到total_mask上
         )
         self.verbose = verbose
+        self.verbose_to_disk = verbose_to_disk
         self.original_frame_shape = None
 
     def _resize_frame(self, frame, resize_to):
@@ -95,7 +119,7 @@ class VLM:
 
         Args:
             target_objects (List[str]): List of target object names.
-            frame (np.ndarray): The first frame of the video sequence. 
+            frame (np.ndarray): The first frame of the video sequence.
             owlv2_threshold (float, optional): Threshold for object detection using OWLv2. Defaults to 0.2.
             sam_threshold (float, optional): Threshold for object segmentation using SAM. Defaults to 0.5.
             verbose (bool, optional): Whether to print verbose output. Defaults to False.
@@ -104,7 +128,7 @@ class VLM:
 
         Returns:
             List[np.ndarray]: A list of masks representing the first frame processed for each target object.
-        
+
         Note:
             frame: The frame is represented as a numpy array. shape: (c, h, w) or (b, c, h, w), where b is the batch size.
             The masks are represented as numpy arrays.
@@ -112,7 +136,7 @@ class VLM:
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.first_frame_resize_to if resize_to is None else resize_to
         if len(frame.shape) == 3:
-            frames = np.expand_dims(frame, 0) # shape: (1, h, w, c)
+            frames = np.expand_dims(frame, 0)  # shape: (1, h, w, c)
         else:
             frames = frame
         # record the original frame shape
@@ -137,6 +161,7 @@ class VLM:
                 threshold=owlv2_threshold,
                 verbose=verbose,
                 release_memory=release_video_memory,
+                log_prefix=f"camera_{i}",
             )
             if len(owlv2_bboxes) == 0:
                 log_info(
@@ -185,6 +210,7 @@ class VLM:
                     threshold=sam_threshold,
                     verbose=verbose,
                     release_memory=release_video_memory,
+                    log_prefix=f"camera_{i}_class_{label}",
                 )
                 # 将sam_result加上类别前缀标签
                 sam_result = sam_result.astype(np.uint32)

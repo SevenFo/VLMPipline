@@ -46,11 +46,11 @@ def log_info(info, color=bcolors.OKGREEN):
 
 def get_device():
     if torch.cuda.is_available():
-        print("Using GPU")
         device = "cuda:1"
     else:
         print("CUDA not available. Please connect to a GPU instance if possible.")
         device = "cpu"
+    print(f"Default device: {device}")
     return device
 
 

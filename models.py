@@ -1,3 +1,4 @@
+import os
 import cv2
 from PIL import Image
 import numpy as np
@@ -35,16 +36,23 @@ from .datasets import VideoDataset
 
 
 class Owlv2Wrapper:
-    def __init__(self, model_name_or_path, device):
+    def __init__(
+        self, model_name_or_path, device, verbose_to_disk: bool = False, log_dir=None
+    ):
         self.processor = Owlv2Processor.from_pretrained(model_name_or_path)
         self.model = Owlv2ForObjectDetection.from_pretrained(model_name_or_path).to(
             device
         )
         self.device = device
+        self.verbose_to_disk = verbose_to_disk
+        self.log_dir = log_dir
+        self.visualization_dir = os.path.join(log_dir, "visualization")
+        if os.path.exists(self.visualization_dir) is False:
+            os.makedirs(self.visualization_dir)
         # change model mode to eval
         self.model.eval()
 
-    def visualization(self, result, image, labels):
+    def visualization(self, result, image, labels, log_prefix=""):
         """
         Visualize the result of object detection on an image.
 
@@ -82,9 +90,22 @@ class Owlv2Wrapper:
                     linewidth=2,
                 )
             )
-        plt.show()
+        plt.show() if not self.verbose_to_disk else plt.savefig(
+            os.path.join(
+                self.visualization_dir,
+                f"{log_prefix}_owlv2_output_{get_clock_time(milliseconds=True)}.png",
+            )
+        )
 
-    def predict(self, image, texts, threshold=0.5, verbose=False, release_memory=True):
+    def predict(
+        self,
+        image,
+        texts,
+        threshold=0.5,
+        verbose=False,
+        release_memory=True,
+        log_prefix="",
+    ):
         """
         Predicts the result for the given image and texts.
 
@@ -133,7 +154,9 @@ class Owlv2Wrapper:
             ret_value.append((boxes, scores, labels))
             if verbose:
                 log_info(f"Detect {texts[idx]}")
-                self.visualization(_all, image.transpose(1, 2, 0), texts)
+                self.visualization(
+                    _all, image.transpose(1, 2, 0), texts, log_prefix=log_prefix
+                )
             # score_recorder = {}
             # best = {}
             # for box, score, label in _all:
@@ -157,7 +180,9 @@ class Owlv2Wrapper:
 
 
 class SAMWrapper:
-    def __init__(self, model_name_or_path, device):
+    def __init__(
+        self, model_name_or_path, device, verbose_to_disk: bool = False, log_dir=None
+    ):
         """
         SAMWrapper constructor.
 
@@ -168,6 +193,11 @@ class SAMWrapper:
         self.model = SamModel.from_pretrained(model_name_or_path).to(device)
         self.processor = SamProcessor.from_pretrained(model_name_or_path)
         self.device = device
+        self.verbose_to_disk = verbose_to_disk
+        self.log_dir = log_dir
+        self.visualization_dir = os.path.join(log_dir, "visualization")
+        if os.path.exists(self.visualization_dir) is False:
+            os.makedirs(self.visualization_dir)
         self.model.eval()
 
     def generate_color_map(self, n):
@@ -200,7 +230,7 @@ class SAMWrapper:
             colored_mask[mask == label] = (np.array(color) * 255).astype(np.uint8)
         return colored_mask
 
-    def visualization(self, image, mask, input_bbox=None):
+    def visualization(self, image, mask, input_bbox=None, log_prefix=""):
         """
         Visualize the result.
 
@@ -224,7 +254,12 @@ class SAMWrapper:
         image = cv2.addWeighted(colored_mask, 0.5, image, 0.5, 0)
         plt.imshow(image)
         if input_bbox is None:
-            plt.show()
+            plt.show() if not self.verbose_to_disk else plt.savefig(
+                os.path.join(
+                    self.visualization_dir,
+                    f"{log_prefix}_sam_output_no_bbox_{get_clock_time(milliseconds=True)}.png",
+                )
+            )
             return
         else:
             # draw bbox
@@ -241,7 +276,12 @@ class SAMWrapper:
                         linewidth=2,
                     )
                 )
-            plt.show()
+            plt.show() if not self.verbose_to_disk else plt.savefig(
+                os.path.join(
+                    self.visualization_dir,
+                    f"{log_prefix}_sam_output_best_{get_clock_time(milliseconds=True)}.png",
+                )
+            )
 
     def predict(
         self,
@@ -252,6 +292,7 @@ class SAMWrapper:
         threshold=0.5,
         verbose=False,
         release_memory=True,
+        log_prefix="",
     ):
         """
         Perform prediction on the image.
@@ -310,17 +351,24 @@ class SAMWrapper:
                 plt.figure()
                 for m_idx, m in enumerate(masks[idx].numpy()):
                     log_info(
-                        f"label {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}"
+                        f"instance {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}"
                     )
                     colored_mask = self.colorize_mask(m)
                     plt.subplot(1, 3, m_idx + 1)
                     plt.imshow(colored_mask)
-                plt.show()
+                plt.show() if not self.verbose_to_disk else plt.savefig(
+                    os.path.join(
+                        self.visualization_dir,
+                        f"{log_prefix}_sam_output_instance_{idx}_{get_clock_time(milliseconds=True)}.png",
+                    )
+                )
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)
         if verbose:
             log_info("best mask:")
-            self.visualization(image.transpose(1, 2, 0), best_mask, input_bbox[0])
+            self.visualization(
+                image.transpose(1, 2, 0), best_mask, input_bbox[0], log_prefix
+            )
         if release_memory:
             del inputs
             del outputs
@@ -340,6 +388,8 @@ class XMemWrapper:
         resnet_50_path=None,
         device="cpu",
         verbose_frame_every=10,
+        verbose_to_disk=False,
+        log_dir=None,
         name=None,
     ):
         self.model_path = model_path
@@ -380,6 +430,11 @@ class XMemWrapper:
         self.initilized = False
         self._name = name if name is not None else id(self)
         self._is_nootbook = is_notebook()
+        self.verbose_to_disk = verbose_to_disk
+        self.log_dir = log_dir
+        self.visualization_dir = os.path.join(log_dir, "visualization")
+        if os.path.exists(self.visualization_dir) is False:
+            os.makedirs(self.visualization_dir)
 
     # deprecated
     def load_model(self):
@@ -487,11 +542,20 @@ class XMemWrapper:
                 visualization_by_individual = overlay_davis(
                     first_frame_disp_hwc, prediction
                 )
-                if self._is_nootbook:
-                    display(Image.fromarray(visualization_by_individual))
+                if self.verbose_to_disk:
+                    plt.imsave(
+                        os.path.join(
+                            self.visualization_dir,
+                            f"camera_{self._name}_xmem_output_first_frame_{get_clock_time(milliseconds=True)}.png",
+                        ),
+                        visualization_by_individual,
+                    )
                 else:
                     plt.imshow(visualization_by_individual)
                     plt.show()
+                if self._is_nootbook:
+                    display(Image.fromarray(visualization_by_individual))
+
             # Map the prediction labels back to the original labels
             prediction = np.vectorize(self.label_mapping.get)(prediction)
             del frame_torch, mask_torch
@@ -545,7 +609,19 @@ class XMemWrapper:
                     frame.transpose(1, 2, 0),
                     prediction,
                 )
-                display(Image.fromarray(visualization_by_individual))
+                if self.verbose_to_disk:
+                    plt.imsave(
+                        os.path.join(
+                            self.visualization_dir,
+                            f"camera_{self._name}_xmem_output_frame_{self.frame_idx}_{get_clock_time(milliseconds=True)}.png",
+                        ),
+                        visualization_by_individual,
+                    )
+                else:
+                    plt.imshow(visualization_by_individual)
+                    plt.show()
+                if self._is_nootbook:
+                    display(Image.fromarray(visualization_by_individual))
             prediction = (
                 resize_mask(prediction, inv_resize_to[-2:])
                 if inv_resize_to is not None
