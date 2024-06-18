@@ -190,17 +190,19 @@ class VLM:
                     for bbox, lbl in zip(owlv2_bboxes, owlv2_labels)
                     if lbl == label
                 ]
-                sam_input_bboxes = [current_bboxes]
+                sam_input_bboxes = [current_bboxes]  # batch x num_bbox x 4
                 sam_input_bpoints = [
                     [
                         [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
                         for bbox in current_bboxes
                     ]
-                ]  # every bbox only has one point
+                ]  # every bbox only has one point: batch x num_bbox x point_per_box x 2
                 # print(current_bboxes)
                 # print(sam_input_bboxes)
                 # print(sam_input_bpoints)
-                sam_input_lables = [[[1] * len(current_bboxes)]]
+                sam_input_lables = [
+                    [[1] * len(current_bboxes)]
+                ]  # batch x 1 x num_bbox 其实应该改成 batch x num_bbox x 1 没改好像也没事
                 # 调用sam_wrapper.predict
                 sam_result = self.sam_wrapper.predict(
                     frame,

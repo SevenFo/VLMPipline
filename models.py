@@ -331,7 +331,7 @@ class SAMWrapper:
             outputs.pred_masks.cpu(),
             inputs["original_sizes"].cpu(),
             inputs["reshaped_input_sizes"].cpu(),
-        )[0]
+        )[0]  # (num_bbox, 3, H, W)
         scores = outputs.iou_scores.detach().cpu().numpy()[0]
         # select the best mask of every bbox and merge all masks of different bboxes
         best_masks = []
