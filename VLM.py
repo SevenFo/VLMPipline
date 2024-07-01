@@ -47,11 +47,7 @@ class VLM:
             input_batch_size (int, optional): The batch size for input frames. Defaults to 1.
         """
         self.device = device
-        self.log_dir = os.path.join(
-            log_dir if log_dir is not None else "./logs",
-            "vlm",
-            f"{time.strftime('%Y-%m-%d-%H-%M-%S')}",
-        )
+        self.log_dir = os.path.join(log_dir if log_dir is not None else "./logs", "vlm")
         if os.path.exists(self.log_dir) is False:
             os.makedirs(self.log_dir)
         self.owlv2_wrapper = Owlv2Wrapper(
