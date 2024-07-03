@@ -105,6 +105,7 @@ class Owlv2Wrapper:
         verbose=False,
         release_memory=True,
         log_prefix="",
+        muilt_targets = False;
     ):
         """
         Predicts the result for the given image and texts.
@@ -151,24 +152,31 @@ class Owlv2Wrapper:
             scores = result["scores"].tolist()
             labels = result["labels"].tolist()
             _all = list(zip(boxes, scores, labels))
-            ret_value.append((boxes, scores, labels))
+            ret_value.append((boxes, scores, labels)) if muilt_targets else None
             if verbose:
                 log_info(f"Detect {texts[idx]}")
                 self.visualization(
                     _all, image.transpose(1, 2, 0), texts, log_prefix=log_prefix
                 )
-            # score_recorder = {}
-            # best = {}
-            # for box, score, label in _all:
-            #     if str(label) not in score_recorder.keys():
-            #         score_recorder.update({str(label):score})
-            #     else:
-            #         if score_recorder[str(label)] > score:
-            #             continue
-            #     score_recorder[str(label)] = score
-            #     best.update({str(label):{'score':score,'bbox':box}})
-            #     print(score_recorder)
-            # best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
+            if not muilt_targets:
+                score_recorder = {}
+                best = {}
+                for box, score, label in _all:
+                    if str(label) not in score_recorder.keys():
+                        score_recorder.update({str(label):score})
+                    else:
+                        if score_recorder[str(label)] > score:
+                            continue
+                    score_recorder[str(label)] = score
+                    best.update({str(label):{'score':score,'bbox':box}})
+
+                best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
+                ret_value = best
+                if verbose:
+                    log_info(f"best:{best}")
+                    # self.visualization(
+                    #     best, image.transpose(1, 2, 0), texts, log_prefix=log_prefix
+                    # )
         if release_memory:
             del inputs
             del outputs

@@ -33,7 +33,6 @@ class VLMProcessWrapper(Process):
         super(VLMProcessWrapper, self).__init__(
             daemon=True,
         )
-        # self.processes = Pool(input_batch_size)
         self.labels = labels  # not shared
         self.frame_shape = frame_shape  # not shared
         self.frame_data_size = np.prod(frame_shape).item()  # not shared
@@ -181,7 +180,7 @@ class VLMProcessWrapper(Process):
                         self.bytes_frame.get_obj(), dtype=np.uint8
                     ).reshape(self.frame_shape)
                     masks = self.vlm.process_first_frame(
-                        self.labels, frame, owlv2_threshold=0.2
+                        self.labels, frame, owlv2_threshold=0.15
                     )
                     self.result[:] = np.stack(masks).flatten()
                     print(
