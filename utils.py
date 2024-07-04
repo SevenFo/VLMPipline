@@ -35,9 +35,9 @@ class bcolors:
 def get_clock_time(milliseconds=False):
     curr_time = datetime.datetime.now()
     if milliseconds:
-        return f"{curr_time.hour}:{curr_time.minute}:{curr_time.second}.{curr_time.microsecond // 1000}"
+        return f"{curr_time.hour}-{curr_time.minute}-{curr_time.second}-{curr_time.microsecond // 1000}"
     else:
-        return f"{curr_time.hour}:{curr_time.minute}:{curr_time.second}"
+        return f"{curr_time.hour}-{curr_time.minute}-{curr_time.second}"
 
 
 def log_info(info, color=bcolors.OKGREEN):

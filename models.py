@@ -72,28 +72,38 @@ class Owlv2Wrapper:
             bounding boxes around the detected objects, along with their corresponding labels and confidence scores.
         """
         assert image.shape[-1] == 3, "image should be RGB format"
-        plt.figure()
-        plt.imshow(image)
+        fig, ax = plt.subplots()
+        ax.imshow(image)
         for box, score, label in result:
             box = [round(i, 2) for i in box]
             box = trans_bbox(box)
             log_info(
                 f"Detected {labels[label]} with confidence {round(score, 3)} at location {[round(i, 2) for i in box]}"
             )
-            plt.gca().add_patch(
+            ax.add_patch(
                 plt.Rectangle(
                     (box[0], box[1]),
                     box[2],
                     box[3],
                     fill=False,
                     edgecolor="red",
-                    linewidth=2,
+                    linewidth=0.5,
                 )
             )
-        plt.show() if not self.verbose_to_disk else plt.savefig(
-            os.path.join(
-                self.visualization_dir,
-                f"{log_prefix}_owlv2_output_{get_clock_time(milliseconds=True)}.png",
+            ax.text(
+                box[0],
+                box[1],
+                f"{labels[label]}: {round(score, 2)}",
+                fontsize=9,
+                color="blue",
+            )
+
+        fig.show() if not self.verbose_to_disk else (
+            fig.savefig(
+                os.path.join(
+                    self.visualization_dir,
+                    f"{log_prefix}_owlv2_output_{get_clock_time(milliseconds=True)}.png",
+                )
             )
         )
 
@@ -105,7 +115,7 @@ class Owlv2Wrapper:
         verbose=False,
         release_memory=True,
         log_prefix="",
-        muilt_targets = False;
+        muilt_targets=False,
     ):
         """
         Predicts the result for the given image and texts.
@@ -148,13 +158,12 @@ class Owlv2Wrapper:
         # we got a batch of image
         for idx, result in enumerate(results):
             # get boxes score and labels
-            boxes = result["boxes"].tolist()  # [(x1, y1, x2, y2), ...)]
+            boxes = result["boxes"].tolist()  # [(x1, y1, x2, y2), ...]
             scores = result["scores"].tolist()
             labels = result["labels"].tolist()
             _all = list(zip(boxes, scores, labels))
             ret_value.append((boxes, scores, labels)) if muilt_targets else None
             if verbose:
-                log_info(f"Detect {texts[idx]}")
                 self.visualization(
                     _all, image.transpose(1, 2, 0), texts, log_prefix=log_prefix
                 )
@@ -163,20 +172,28 @@ class Owlv2Wrapper:
                 best = {}
                 for box, score, label in _all:
                     if str(label) not in score_recorder.keys():
-                        score_recorder.update({str(label):score})
+                        score_recorder.update({str(label): score})
                     else:
                         if score_recorder[str(label)] > score:
                             continue
                     score_recorder[str(label)] = score
-                    best.update({str(label):{'score':score,'bbox':box}})
+                    best.update({str(label): {"score": score, "bbox": box}})
 
-                best = list([(value['bbox'], value['score'], int(key))for key, value in best.items()])
-                ret_value = best
+                best_scores = list([v["score"] for k, v in best.items()])
+                best_labels = list([int(k) for k, v in best.items()])
+                best_boxes = list([v["bbox"] for k, v in best.items()])
+                log_info("-" * 10 + "Best" + "-" * 10)
                 if verbose:
-                    log_info(f"best:{best}")
-                    # self.visualization(
-                    #     best, image.transpose(1, 2, 0), texts, log_prefix=log_prefix
-                    # )
+                    self.visualization(
+                        list(zip(best_boxes, best_scores, best_labels)),
+                        image.transpose(1, 2, 0),
+                        texts,
+                        log_prefix + "_best",
+                    )
+                ret_value.append(
+                    (best_boxes, best_scores, best_labels)
+                )  # to mock the same return format [n_batch, 3, n_target]
+
         if release_memory:
             del inputs
             del outputs
@@ -254,15 +271,15 @@ class SAMWrapper:
         # colorize mask
         colored_mask = self.colorize_mask(mask)
         # plot image
-        plt.figure()
+        fig, ax = plt.subplots()
         # mix image and mask
         assert (
             colored_mask.shape == image.shape
         ), f"image and mask should have same shape, while got {image.shape} and {colored_mask.shape}"
         image = cv2.addWeighted(colored_mask, 0.5, image, 0.5, 0)
-        plt.imshow(image)
+        ax.imshow(image)
         if input_bbox is None:
-            plt.show() if not self.verbose_to_disk else plt.savefig(
+            fig.show() if not self.verbose_to_disk else fig.savefig(
                 os.path.join(
                     self.visualization_dir,
                     f"{log_prefix}_sam_output_no_bbox_{get_clock_time(milliseconds=True)}.png",
@@ -274,7 +291,7 @@ class SAMWrapper:
             for box in input_bbox:
                 box = [round(i, 2) for i in box]
                 box = trans_bbox(box)  # convert to [x1, y1, w, h]
-                plt.gca().add_patch(
+                ax.add_patch(
                     plt.Rectangle(
                         (box[0], box[1]),
                         box[2],
@@ -284,11 +301,13 @@ class SAMWrapper:
                         linewidth=2,
                     )
                 )
-            plt.show() if not self.verbose_to_disk else plt.savefig(
-                os.path.join(
-                    self.visualization_dir,
-                    f"{log_prefix}_sam_output_best_{get_clock_time(milliseconds=True)}.png",
-                )
+            fig.show() if not self.verbose_to_disk else (
+                fig.savefig(
+                    os.path.join(
+                        self.visualization_dir,
+                        f"{log_prefix}_sam_output_best_{get_clock_time(milliseconds=True)}.png",
+                    )
+                ),
             )
 
     def predict(
@@ -320,7 +339,7 @@ class SAMWrapper:
         Returns:
             best_mask: The best mask.
         """
-        log_info("#" * 10 + "SAM Model START" + "#" * 10)
+        log_info("#" * 10 + f"SAM Model ({log_prefix}) START" + "#" * 10)
         assert image.shape[0] == 3, "image should be RGB format with shape (c, h, w)"
         # preprocess image and prompt, it seems that it provided resize function?
         inputs = self.processor(
@@ -356,19 +375,20 @@ class SAMWrapper:
                 # mask
             )
             if verbose:
-                plt.figure()
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
                 for m_idx, m in enumerate(masks[idx].numpy()):
                     log_info(
                         f"instance {idx} mask result {m_idx} iou score:{round(float(score[m_idx]),3)}"
                     )
                     colored_mask = self.colorize_mask(m)
-                    plt.subplot(1, 3, m_idx + 1)
-                    plt.imshow(colored_mask)
-                plt.show() if not self.verbose_to_disk else plt.savefig(
-                    os.path.join(
-                        self.visualization_dir,
-                        f"{log_prefix}_sam_output_instance_{idx}_{get_clock_time(milliseconds=True)}.png",
-                    )
+                    axes[m_idx].imshow(colored_mask)
+                fig.show() if not self.verbose_to_disk else (
+                    fig.savefig(
+                        os.path.join(
+                            self.visualization_dir,
+                            f"{log_prefix}_sam_output_instance_{idx}_{get_clock_time(milliseconds=True)}.png",
+                        )
+                    ),
                 )
         # merge all masks to one mask
         best_mask = np.sum(best_masks, axis=0).astype(np.uint8)

@@ -161,7 +161,7 @@ class VLM:
             )
             if len(owlv2_bboxes) == 0:
                 log_info(
-                    f"no target objects found in frame {i}, so we will skip this frame",
+                    f"no target objects found in camera {i}, skip.",
                     color=bcolors.WARNING,
                 )
                 empty_mask = np.zeros(
@@ -179,7 +179,7 @@ class VLM:
                 (frame.shape[1], frame.shape[2])
             )  # 用于存储sam的结果, shape: (h, w)
             # 对每个类别进行循环
-            for i, label in enumerate(set(owlv2_labels)):
+            for idx, label in enumerate(set(owlv2_labels)):
                 # 获取当前类别的bbox
                 current_bboxes = [
                     bbox
@@ -208,7 +208,7 @@ class VLM:
                     threshold=sam_threshold,
                     verbose=verbose,
                     release_memory=release_video_memory,
-                    log_prefix=f"camera_{i}_class_{label}",
+                    log_prefix=f"camera_{i}_class_{target_objects[label]}",  # 为了区分不同类别的输出
                 )
                 # 将sam_result加上类别前缀标签
                 sam_result = sam_result.astype(np.uint32)
