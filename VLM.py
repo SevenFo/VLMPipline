@@ -5,7 +5,7 @@ import numpy as np
 import warnings, torch
 from torchvision.transforms import Resize
 
-from .utils import get_device, log_info, bcolors
+from .utils import get_device, log_info, bcolors, resize_mask
 from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
 
 
@@ -29,6 +29,7 @@ class VLM:
         verbose_to_disk: bool = False,
         log_dir: str = None,
         input_batch_size=1,
+        enable_xmem = True
     ) -> None:
         """
         Initializes the VLM (VoxPoser Landmark) object.
@@ -50,6 +51,7 @@ class VLM:
         self.log_dir = os.path.join(log_dir if log_dir is not None else "./logs", "vlm")
         if os.path.exists(self.log_dir) is False:
             os.makedirs(self.log_dir)
+        self.enable_xeme = enable_xmem
         self.owlv2_wrapper = Owlv2Wrapper(
             owlv2_model_path,
             self.device,
@@ -74,7 +76,7 @@ class VLM:
                     verbose_to_disk=verbose_to_disk,
                     log_dir=self.log_dir,
                     name=f"{i}",
-                )
+                ) if enable_xmem else None
             )
         if resize_to is not None:
             self.first_frame_resize_to = (
@@ -129,6 +131,7 @@ class VLM:
             frame: The frame is represented as a numpy array. shape: (c, h, w) or (b, c, h, w), where b is the batch size.
             The masks are represented as numpy arrays.
         """
+        assert self.enable_xeme
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.first_frame_resize_to if resize_to is None else resize_to
         if len(frame.shape) == 3:
@@ -231,6 +234,7 @@ class VLM:
         release_video_memory=False,
         resize_to=None,
     ):
+        assert self.enable_xeme
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.frame_resize_to if resize_to is None else resize_to
         if len(frame.shape) == 3:
@@ -249,6 +253,126 @@ class VLM:
                 inv_resize_to=self.original_frame_shape,
             )
             ret_value.append(mask)
+        return ret_value
+
+    def process_sole_frame(
+        self,
+        target_objects: List[str],
+        frame: np.ndarray,
+        owlv2_threshold=0.2,
+        sam_threshold=0.5,
+        verbose=False,
+        release_video_memory=True,
+        resize_to=None,
+    ):
+        """
+        Process the first frame of a video sequence.
+
+        Args:
+            target_objects (List[str]): List of target object names.
+            frame (np.ndarray): The first frame of the video sequence.
+            owlv2_threshold (float, optional): Threshold for object detection using OWLv2. Defaults to 0.2.
+            sam_threshold (float, optional): Threshold for object segmentation using SAM. Defaults to 0.5.
+            verbose (bool, optional): Whether to print verbose output. Defaults to False.
+            release_video_memory (bool, optional): Whether to release video memory after processing. Defaults to True.
+            resize_to (tuple, optional): The desired size to resize the frame. Defaults to None.
+
+        Returns:
+            List[np.ndarray]: A list of masks representing the first frame processed for each target object.
+
+        Note:
+            frame: The frame is represented as a numpy array. shape: (c, h, w) or (b, c, h, w), where b is the batch size.
+            The masks are represented as numpy arrays.
+        """
+        verbose = self.verbose if self.verbose is not None else verbose
+        resize_to = self.first_frame_resize_to if resize_to is None else resize_to
+        if len(frame.shape) == 3:
+            frames = np.expand_dims(frame, 0)  # shape: (1, h, w, c)
+        else:
+            frames = frame
+        # record the original frame shape
+        self.original_frame_shape = frames.shape
+        # resize the frame to the target size by the shortest side
+        frames = self._resize_frame(frames, resize_to)
+        if self.original_frame_shape != frames.shape:
+            warnings.warn(
+                f"the frame shape has been changed by resizing, {self.original_frame_shape} -> {frames.shape}, so we will resize the finnal mask to the original shape, which may cause some problems."
+            )
+        else:
+            self.original_frame_shape = None
+        assert (
+            frames.shape[0] == len(self.xmem_wrappers)
+        ), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        ret_value = []
+        for i, xmem_wrapper in enumerate(self.xmem_wrappers):
+            frame = frames[i, ...]
+            owlv2_bboxes, owlv2_scores, owlv2_labels = self.owlv2_wrapper.predict(
+                frame,
+                target_objects,
+                threshold=owlv2_threshold,
+                verbose=verbose,
+                release_memory=release_video_memory,
+                log_prefix=f"camera_{i}",
+            )
+            if len(owlv2_bboxes) == 0:
+                log_info(
+                    f"no target objects found in camera {i}, skip.",
+                    color=bcolors.WARNING,
+                )
+                empty_mask = np.zeros(
+                    self.original_frame_shape[-2:]
+                    if self.original_frame_shape is not None
+                    else frame.shape[-2:],
+                    dtype=np.uint32,
+                )
+                ret_value.append(empty_mask)  # add a empty mask (all background)
+                continue
+            total_mask = np.zeros(
+                (frame.shape[1], frame.shape[2])
+            )  # 用于存储sam的结果, shape: (h, w)
+            # 对每个类别进行循环
+            for idx, label in enumerate(set(owlv2_labels)):
+                # 获取当前类别的bbox
+                current_bboxes = [
+                    bbox
+                    for bbox, lbl in zip(owlv2_bboxes, owlv2_labels)
+                    if lbl == label
+                ]
+                sam_input_bboxes = [current_bboxes]  # batch x num_bbox x 4
+                sam_input_bpoints = [
+                    [
+                        [[(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]]
+                        for bbox in current_bboxes
+                    ]
+                ]  # every bbox only has one point: batch x num_bbox x point_per_box x 2
+                # print(current_bboxes)
+                # print(sam_input_bboxes)
+                # print(sam_input_bpoints)
+                sam_input_lables = [
+                    [[1] * len(current_bboxes)]
+                ]  # batch x 1 x num_bbox 其实应该改成 batch x num_bbox x 1 没改好像也没事
+                # 调用sam_wrapper.predict
+                sam_result = self.sam_wrapper.predict(
+                    frame,
+                    input_bbox=sam_input_bboxes,
+                    input_points=sam_input_bpoints,
+                    input_labels=sam_input_lables,
+                    threshold=sam_threshold,
+                    verbose=verbose,
+                    release_memory=release_video_memory,
+                    log_prefix=f"camera_{i}_class_{target_objects[label]}",  # 为了区分不同类别的输出
+                )
+                # 将sam_result加上类别前缀标签
+                sam_result = sam_result.astype(np.uint32)
+                sam_result[sam_result > 0] += (label + 1) * self.category_multiplier
+                total_mask += sam_result
+            total_mask = total_mask.astype(np.uint32)
+            prediction = (
+                resize_mask(total_mask, self.original_frame_shape[-2:])
+                if self.original_frame_shape is not None
+                else total_mask
+            )
+            ret_value.append(prediction)
         return ret_value
 
     def reset(self):
