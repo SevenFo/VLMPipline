@@ -46,7 +46,7 @@ def log_info(info, color=bcolors.OKGREEN):
 
 def get_device():
     if torch.cuda.is_available():
-        device = "cuda:1"
+        device = "cuda:0"
     else:
         print("CUDA not available. Please connect to a GPU instance if possible.")
         device = "cpu"
@@ -135,9 +135,18 @@ def resize_mask(mask, size):
     Returns:
         numpy.array: The resized mask.
     """
+    # 将 np.uint32 转换为 np.int32 以便 torch 处理
+    if mask.dtype == np.uint32:
+        mask = mask.astype(np.int32)
+    # 将 numpy 数组转换为 torch 张量
     mask = torch.from_numpy(mask).unsqueeze(0)
+    # 定义 resize 函数
     resize_func = transforms.Resize(size, interpolation=Image.NEAREST)
-    return resize_func(mask).squeeze(0).numpy()
+    # 调整大小并转换回 numpy 数组
+    resized_mask = resize_func(mask).squeeze(0).numpy()
+    # 将调整大小后的数组转换回 uint32
+    resized_mask = resized_mask.astype(np.uint32)
+    return resized_mask
 
 
 def resize_rgb(rgb, size):
