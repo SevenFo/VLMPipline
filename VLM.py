@@ -4,6 +4,8 @@ import time
 import numpy as np
 import warnings, torch
 from torchvision.transforms import Resize
+import copy
+import cv2
 
 from .utils import get_device, log_info, bcolors, resize_mask
 from .models import Owlv2Wrapper, SAMWrapper, XMemWrapper
@@ -29,7 +31,7 @@ class VLM:
         verbose_to_disk: bool = False,
         log_dir: str = None,
         input_batch_size=1,
-        enable_xmem = True
+        enable_xmem=True,
     ) -> None:
         """
         Initializes the VLM (VoxPoser Landmark) object.
@@ -76,7 +78,9 @@ class VLM:
                     verbose_to_disk=verbose_to_disk,
                     log_dir=self.log_dir,
                     name=f"{i}",
-                ) if enable_xmem else None
+                )
+                if enable_xmem
+                else None
             )
         if resize_to is not None:
             self.first_frame_resize_to = (
@@ -94,6 +98,33 @@ class VLM:
         self.original_frame_shape = None
 
     def _resize_frame(self, frame, resize_to):
+        def resize_by_short_edge(image, target_size):
+            """
+            按短边等比例缩放图像
+
+            Args:
+                image: 输入图像 (numpy array)
+                target_size: 目标短边尺寸
+
+            Returns:
+                resized_img: 缩放后的图像
+            """
+            h, w = image.shape[:2]
+
+            # 计算短边缩放比例
+            scale = target_size / min(h, w)
+
+            # 计算新的宽高
+            new_h = int(h * scale)
+            new_w = int(w * scale)
+
+            # 等比例缩放
+            resized_img = cv2.resize(
+                image, (new_w, new_h), interpolation=cv2.INTER_LINEAR
+            )
+
+            return resized_img
+
         # resize frame by the shortest side
         frame = torch.from_numpy(frame)
         if resize_to is not None:
@@ -132,6 +163,7 @@ class VLM:
             The masks are represented as numpy arrays.
         """
         assert self.enable_xeme
+        frame = copy.deepcopy(frame)
         verbose = self.verbose if self.verbose is not None else verbose
         resize_to = self.first_frame_resize_to if resize_to is None else resize_to
         if len(frame.shape) == 3:
