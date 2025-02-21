@@ -4,6 +4,7 @@ from torchvision import transforms
 import numpy as np
 from PIL import Image
 import open3d as o3d
+import subprocess
 
 
 def is_notebook() -> bool:
@@ -44,13 +45,77 @@ def log_info(info, color=bcolors.OKGREEN):
     print(f"{color}[VLM INFO|{get_clock_time()}] {info}{bcolors.ENDC}")
 
 
-def get_device():
+def get_gpu_memory_map():
+    """Get the current gpu usage.
+
+    Returns
+    -------
+    device_id -> percentage of gpu used
+    """
+    result = subprocess.check_output(
+        [
+            "nvidia-smi",
+            "--query-gpu=memory.total,memory.used",
+            "--format=csv,nounits,noheader",
+        ],
+        encoding="utf-8",
+    )
+    gpu_memory = [
+        int(x.split(",")[0]) - int(x.split(",")[1]) for x in result.strip().split("\n")
+    ]
+    return gpu_memory
+
+
+def get_device(required_memory_mb=0, safety_margin_mb=500):
+    """
+    获取合适的设备，考虑实际可用显存和安全边际
+
+    Args:
+        required_memory_mb (int): 需要的显存大小（MB）
+        safety_margin_mb (int): 安全边际显存（MB）
+
+    Returns:
+        str: 设备标识符（'cuda:n' 或 'cpu'）
+    """
     if torch.cuda.is_available():
-        device = "cuda:0"
-    else:
-        print("CUDA not available. Please connect to a GPU instance if possible.")
+        available_gpus = []
+        gpu_memory_map = get_gpu_memory_map()
+        for i in range(torch.cuda.device_count()):
+            total_memory = (
+                torch.cuda.get_device_properties(i).total_memory / 1024 / 1024
+            )
+            # 使用 nvidia-smi 获取的可用显存
+            free_memory = gpu_memory_map[i]
+
+            # 减去安全边际
+            free_memory -= safety_margin_mb
+
+            available_gpus.append((i, free_memory))
+            log_info(
+                f"GPU {i}: Total: {total_memory:.2f}MB, "
+                f"Free: {free_memory:.2f}MB (estimated from nvidia-smi)"
+            )
+
+        # 按可用显存排序，选择显存最多的GPU
+        available_gpus.sort(key=lambda x: x[1], reverse=True)
+
+        for gpu_id, free_memory in available_gpus:
+            if free_memory >= required_memory_mb:
+                device = f"cuda:{gpu_id}"
+                log_info(
+                    f"Selected device: {device} with {free_memory:.2f}MB free memory"
+                )
+                return device
+
+        log_info(
+            "No GPU with sufficient memory available. Using CPU instead.",
+            color=bcolors.WARNING,
+        )
         device = "cpu"
-    print(f"Default device: {device}")
+    else:
+        log_info("CUDA not available. Using CPU instead.", color=bcolors.WARNING)
+        device = "cpu"
+
     return device
 
 
@@ -95,7 +160,7 @@ def free_video_memory(*variables_to_del, device="cuda"):
     a = torch.cuda.memory_allocated(device)
     # print total available memory and used memory (in bytes)
     print(
-        f"total memory (in MB): {t/1024/1024}, reserved memory (in MB): {r/1024/1024}, allocated memory (in MB): {a/1024/1024}"
+        f"total memory (in MB): {t / 1024 / 1024}, reserved memory (in MB): {r / 1024 / 1024}, allocated memory (in MB): {a / 1024 / 1024}"
     )
 
 
@@ -111,7 +176,7 @@ def get_memory_usage(device="cuda"):
     a = torch.cuda.memory_allocated(device)
     # print total available memory and used memory (in bytes)
     print(
-        f"total memory (in MB): {round(t/1024/1024,1)}, reserved memory (in MB): {round(r/1024/1024,1)}, allocated memory (in MB): {round(a/1024/1024,1)}"
+        f"total memory (in MB): {round(t / 1024 / 1024, 1)}, reserved memory (in MB): {round(r / 1024 / 1024, 1)}, allocated memory (in MB): {round(a / 1024 / 1024, 1)}"
     )
 
 

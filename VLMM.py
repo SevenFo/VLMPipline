@@ -21,7 +21,7 @@ class VLMProcessWrapper(Process):
         xmem_model_path,
         resnet_18_path=None,
         resnet_50_path=None,
-        device=get_device(),
+        device=get_device(required_memory_mb=10240),
         resize_to=(480, 480),
         category_multiplier=100,
         verbose=None,
@@ -73,64 +73,88 @@ class VLMProcessWrapper(Process):
     @timer_decorator
     def process_first_frame(self, frame: np.ndarray):
         self.wait_for_ready()
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: set frame to VLM process"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: set frame to VLM process"
+            + bcolors.ENDC
         ) if self.verbose else None
         self.set_frame(frame)
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: weakup VLM process to process first frame"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: weakup VLM process to process first frame"
+            + bcolors.ENDC
         ) if self.verbose else None
         self.process_first_frame_event.set()
         self.wait_for_ready()
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: receive the result of first frame processing"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: receive the result of first frame processing"
+            + bcolors.ENDC
         ) if self.verbose else None
         ret = np.frombuffer(self.result.get_obj(), dtype=np.uint32).reshape(
             self.mask_shape
         )
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: post process frame finished"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: post process frame finished"
+            + bcolors.ENDC
         ) if self.verbose else None
         return ret
 
     @timer_decorator
     def process_frame(self, frame: np.ndarray):
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: set frame to VLM process"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: set frame to VLM process"
+            + bcolors.ENDC
         ) if self.verbose else None
         self.set_frame(frame)
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: weakup VLM process to process frame"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: weakup VLM process to process frame"
+            + bcolors.ENDC
         ) if self.verbose else None
         self.process_frame_event.set()
         self.wait_for_ready()
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: receive the result of frame processing"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: receive the result of frame processing"
+            + bcolors.ENDC
         ) if self.verbose else None
         ret = np.frombuffer(self.result.get_obj(), dtype=np.uint32).reshape(
             self.mask_shape
         )
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: post process frame finished"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: post process frame finished"
+            + bcolors.ENDC
         ) if self.verbose else None
         return ret
 
     def wait_for_ready(self):
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: waiting for VLM process ready"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: waiting for VLM process ready"
+            + bcolors.ENDC
         ) if self.verbose else None
         self.ready_event.wait()
         # if self.ready_event.is_set
         self.ready_event.clear()  # ready for next wait
-        print(bcolors.OKCYAN+
-            f"[{self.get_current_process_id()}]: VLM process ready"+ bcolors.ENDC
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: VLM process ready"
+            + bcolors.ENDC
         ) if self.verbose else None
 
     def reset(self):
         self.is_processed_first_frame = False
 
     def shutdown(self):
-        print(bcolors.WARNING+f"[{self.get_current_process_id()}]: VLM process stopping"+bcolors.ENDC)
+        print(
+            bcolors.WARNING
+            + f"[{self.get_current_process_id()}]: VLM process stopping"
+            + bcolors.ENDC
+        )
         self.is_running.value = False
         self.ready_event.set()
         self.process_frame_event.set()
@@ -144,7 +168,11 @@ class VLMProcessWrapper(Process):
         # self.frame_shape = frame.shape
 
     def run(self):
-        print(bcolors.OKCYAN+f"[{self.get_current_process_id()}]: VLM init start"+bcolors.ENDC)
+        print(
+            bcolors.OKCYAN
+            + f"[{self.get_current_process_id()}]: VLM init start"
+            + bcolors.ENDC
+        )
         import torch
 
         with torch.no_grad():
@@ -164,17 +192,23 @@ class VLMProcessWrapper(Process):
                 input_batch_size=self.input_batch_size,
             )
             self.ready_event.set()
-            print(bcolors.OKCYAN+
-                f"[{self.get_current_process_id()}]: VLM init finished"+bcolors.ENDC
+            print(
+                bcolors.OKCYAN
+                + f"[{self.get_current_process_id()}]: VLM init finished"
+                + bcolors.ENDC
             ) if self.verbose else None
             while self.is_running.value:
                 if not self.is_processed_first_frame:
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM process waiting for process first frame"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM process waiting for process first frame"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     self.process_first_frame_event.wait()
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM start process first frame"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM start process first frame"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     frame = np.frombuffer(
                         self.bytes_frame.get_obj(), dtype=np.uint8
@@ -183,28 +217,40 @@ class VLMProcessWrapper(Process):
                         self.labels, frame, owlv2_threshold=0.15
                     )
                     self.result[:] = np.stack(masks).flatten()
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM process finished"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM process finished"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     self.is_processed_first_frame = True
                     self.process_first_frame_event.clear()
                     self.ready_event.set()
                 else:
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM process waiting for weakup"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM process waiting for weakup"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     self.process_frame_event.wait()
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM start process frame"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM start process frame"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     frame = np.frombuffer(
                         self.bytes_frame.get_obj(), dtype=np.uint8
                     ).reshape(self.frame_shape)
                     masks = self.vlm.process_frame(frame, release_video_memory=False)
                     self.result[:] = np.stack(masks).flatten()
-                    print(bcolors.OKCYAN+
-                        f"[{self.get_current_process_id()}]: VLM process finished"+bcolors.ENDC
+                    print(
+                        bcolors.OKCYAN
+                        + f"[{self.get_current_process_id()}]: VLM process finished"
+                        + bcolors.ENDC
                     ) if self.verbose else None
                     self.process_frame_event.clear()
                     self.ready_event.set()
-            print(bcolors.WARNING+f"[{self.get_current_process_id()}]: VLM process stopped"+bcolors.ENDC)
+            print(
+                bcolors.WARNING
+                + f"[{self.get_current_process_id()}]: VLM process stopped"
+                + bcolors.ENDC
+            )

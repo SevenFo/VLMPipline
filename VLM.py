@@ -23,7 +23,7 @@ class VLM:
         xmem_model_path,
         resnet_18_path=None,
         resnet_50_path=None,
-        device=get_device(),
+        device=get_device(required_memory_mb=10240),
         resize_to=(480, 480),
         category_multiplier=100,
         verbose=None,
@@ -180,9 +180,9 @@ class VLM:
             )
         else:
             self.original_frame_shape = None
-        assert (
-            frames.shape[0] == len(self.xmem_wrappers)
-        ), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        assert frames.shape[0] == len(self.xmem_wrappers), (
+            f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        )
         ret_value = []
         for i, xmem_wrapper in enumerate(self.xmem_wrappers):
             frame = frames[i, ...]
@@ -332,9 +332,9 @@ class VLM:
             )
         else:
             self.original_frame_shape = None
-        assert (
-            frames.shape[0] == len(self.xmem_wrappers)
-        ), f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        assert frames.shape[0] == len(self.xmem_wrappers), (
+            f"the input batch size is {len(self.xmem_wrappers)}, but the frame batch size is {frames.shape[0]}"
+        )
         ret_value = []
         for i, xmem_wrapper in enumerate(self.xmem_wrappers):
             frame = frames[i, ...]
